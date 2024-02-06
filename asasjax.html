@@ -6,27 +6,18 @@
 <title>Open Wikipedia</title>
 </head>
 <body>
-<button onclick="openWikipedia()">Open Wikipedia</button>
+<h1>L O L</h1>
 
 <script>
-var resizeInterval;
 
 function openWikipedia() {
     window.open("https://en.wikipedia.org", "_blank", "width=800,height=600");
     startResizing();
 }
+window.onload = function() {
+    setInterval(openWikipedia, 5000); // 5000 milliseconds = 5 seconds
+};
 
-function startResizing() {
-    resizeInterval = setInterval(resizeWindowRandomly, 1000); // Resize every second (1000 milliseconds)
-}
-
-function resizeWindowRandomly() {
-    var width = window.innerWidth;
-    var height = window.innerHeight;
-    var newX = width + Math.floor(Math.random() * 3) - 1; // Randomly adjust width by -1, 0, or 1
-    var newY = height + Math.floor(Math.random() * 3) - 1; // Randomly adjust height by -1, 0, or 1
-    window.resizeTo(newX, newY);
-}
 </script>
 </body>
 </html>
