@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>VerseVision</title>
+<style>
+  body {
+    background-color: #282828;
+    color: #DDDDDD;
+    font-family: "Roboto", sans-serif;
+  }
+  .container {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 100vh;
+  }
+  .box {
+    padding: 20px;
+    max-width: 400px;
+    width: 100%;
+    border: 2px solid #DDDDDD;
+    background-color: #1A1A1A;
+  }
+  .reference {
+    text-align: center;
+    font-weight: bold;
+    cursor: pointer;
+  }
+  .text {
+    white-space: pre-wrap;
+    margin: 20px 0;
+  }
+  #verseReference {
+    display: inline-block;
+    border: none;
+    background-color: transparent;
+    color: inherit;
+    font-family: inherit;
+    font-size: inherit;
+    padding: 0;
+    margin: 0;
+    width: calc(100% - 40px);
+    outline: none;
+  }
+</style>
+</head>
+<body>
+  <div class="container">
+    <div class="box">
+      <p class="text-center font-roboto text-xl my-4">Welcome to VerseVision!</p>
+      <div class="reference" onclick="handleEditReferenceClick()">
+        [ <span id="verseReference" contenteditable="true" oninput="handleReferenceChange()"></span> ]
+      </div>
+      <p id="verseText" class="text"></p>
+    </div>
+  </div>
+
+<script>
+  let currentReference = "Genesis 1:1";
+
+  async function fetchData(reference) {
+    const res = await fetch(`https://labs.bible.org/api/?passage=${reference}&type=json`);
+    const data = await res.json();
+    const text = data[0]?.text || "Verse not found";
+    document.getElementById("verseText").textContent = text;
+  }
+
+  function handleEditReferenceClick() {
+    const referenceElement = document.getElementById("verseReference");
+    referenceElement.focus();
+  }
+
+  document.getElementById("verseReference").addEventListener("blur", async () => {
+    const referenceElement = document.getElementById("verseReference");
+    const reference = referenceElement.textContent.trim();
+    currentReference = reference;
+    await fetchData(reference);
+  });
+
+  async function handleReferenceChange() {
+    const referenceElement = document.getElementById("verseReference");
+    const reference = referenceElement.textContent.trim();
+    currentReference = reference;
+    await fetchData(reference);
+  }
+
+  // Initial fetch for Genesis 1:1
+  fetchData("Genesis 1:1");
+</script>
+</body>
+</html>
