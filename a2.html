@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>VerseVision</title>
+<style>
+  body {
+    background-color: #282828;
+    color: #DDDDDD;
+    font-family: "Roboto", sans-serif;
+  }
+  .container {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 100vh;
+  }
+  .box {
+    padding: 20px;
+    max-width: 400px;
+    width: 100%;
+    border: 2px solid #DDDDDD;
+    background-color: #1A1A1A;
+  }
+  .reference {
+    text-align: center;
+    font-weight: bold;
+    cursor: pointer;
+  }
+  .text {
+    white-space: pre-wrap;
+    margin: 20px 0;
+  }
+  .button-container {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .button {
+    border: 2px solid #DDDDDD;
+    padding: 10px 20px;
+    cursor: pointer;
+    transition: background-color 0.3s, color 0.3s;
+  }
+  .button:hover {
+    background-color: #DDDDDD;
+    color: #1A1A1A;
+  }
+</style>
+</head>
+<body>
+  <div class="container">
+    <div class="box">
+      <p class="text-center font-roboto text-xl my-4">Welcome to VerseVision!</p>
+      <div class="reference" onclick="handleEditReferenceClick()">
+        [ <span id="verseReference">Genesis 1:1</span> ]
+      </div>
+      <p id="verseText" class="text"></p>
+      <div class="button-container">
+        <button class="button" onclick="handleExplainClick()">Explain</button>
+        <div>
+          <button class="button" onclick="handlePrevClick()">&lt; Prev</button>
+          <button class="button" onclick="handleNextClick()">Next &gt;</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+<script>
+  async function fetchData(reference) {
+    const res = await fetch(`https://labs.bible.org/api/?passage=${reference}&type=json`);
+    const data = await res.json();
+    const text = data[0]?.text || "Verse not found";
+    document.getElementById("verseText").textContent = text;
+  }
+
+  function handleEditReferenceClick() {
+    const referenceElement = document.getElementById("verseReference");
+    referenceElement.contentEditable = true;
+    referenceElement.focus();
+  }
+
+  document.getElementById("verseReference").addEventListener("blur", async () => {
+    const referenceElement = document.getElementById("verseReference");
+    referenceElement.contentEditable = false;
+    const reference = referenceElement.textContent.trim();
+    await fetchData(reference);
+  });
+
+  function handleExplainClick() {
+    // Logic to explain the verse
+    alert("Explanation not implemented yet.");
+  }
+
+  function handlePrevClick() {
+    // Logic to go to the previous verse
+    alert("Previous verse not implemented yet.");
+  }
+
+  function handleNextClick() {
+    // Logic to go to the next verse
+    alert("Next verse not implemented yet.");
+  }
+
+  // Initial fetch for Genesis 1:1
+  fetchData("Genesis 1:1");
+</script>
+</body>
+</html>
