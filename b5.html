@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>VerseVision</title>
+<style>
+  body {
+    background-color: #282828;
+    color: #DDDDDD;
+    font-family: "Roboto", sans-serif;
+  }
+  .container {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 100vh;
+  }
+  .box {
+    padding: 20px;
+    max-width: 400px;
+    width: 100%;
+    border: 2px solid #DDDDDD;
+    background-color: #1A1A1A;
+  }
+  .reference {
+    text-align: center;
+    font-weight: bold;
+    cursor: pointer;
+  }
+  .text {
+    white-space: pre-wrap;
+    margin: 20px 0;
+  }
+  .button-container {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .button {
+    border: 2px solid #DDDDDD;
+    padding: 10px 20px;
+    cursor: pointer;
+    transition: background-color 0.3s, color 0.3s;
+  }
+  .button:hover {
+    background-color: #DDDDDD;
+    color: #1A1A1A;
+  }
+  #verseReference {
+    display: inline-block;
+    border: none;
+    background-color: transparent;
+    color: inherit;
+    font-family: inherit;
+    font-size: inherit;
+    padding: 0;
+    margin: 0;
+    width: calc(100% - 40px);
+    outline: none;
+  }
+</style>
+</head>
+<body>
+  <div class="container">
+    <div class="box">
+      <p class="text-center font-roboto text-xl my-4">Welcome to VerseVision!</p>
+      <div class="reference" onclick="handleEditReferenceClick()">
+        [ <span id="verseReference" contenteditable="true" onkeydown="handleKeyDown(event)"></span> ]
+      </div>
+      <p id="verseText" class="text"></p>
+      <div class="button-container">
+        <button class="button" onclick="handleExplainClick()">Explain</button>
+        <div>
+          <button class="button" onclick="handlePrevClick()">&lt; Prev</button>
+          <button class="button" onclick="handleNextClick()">Next &gt;</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+<script>
+  let currentReference = "Genesis 1:1";
+
+  async function fetchData(reference) {
+    const res = await fetch(`https://labs.bible.org/api/?passage=${reference}&type=json`);
+    const data = await res.json();
+    const text = data[0]?.text || "Verse not found";
+    document.getElementById("verseText").textContent = text;
+  }
+
+  function handleEditReferenceClick() {
+    const referenceElement = document.getElementById("verseReference");
+    referenceElement.focus();
+  }
+
+  document.getElementById("verseReference").addEventListener("blur", async () => {
+    const referenceElement = document.getElementById("verseReference");
+    const reference = referenceElement.textContent.trim();
+    currentReference = reference;
+    await fetchData(reference);
+  });
+
+  async function handleExplainClick() {
+    // Logic to explain the verse
+    alert("Explanation not implemented yet.");
+  }
+
+  async function handlePrevClick() {
+    const [book, chapterVerse] = currentReference.split(":");
+    const [chapter, verse] = chapterVerse.split(".").map(part => parseInt(part));
+    
+    if (verse === 1 && chapter === 1) {
+      alert("No previous verse available.");
+      return;
+    }
+
+    if (verse === 1) {
+      // Move to the last verse of the previous chapter
+      const prevChapter = chapter - 1;
+      const prevVerse = await getLastVerse(book, prevChapter);
+      currentReference = `${book}:${prevChapter}.${prevVerse}`;
+    } else {
+      // Move to the previous verse in the same chapter
+      currentReference = `${book}:${chapter}.${verse - 1}`;
+    }
+
+    await fetchData(currentReference);
+  }
+
+  async function handleNextClick() {
+    const [book, chapterVerse] = currentReference.split(":");
+    const [chapter, verse] = chapterVerse.split(".").map(part => parseInt(part));
+    const nextVerse = await getLastVerse(book, chapter);
+    
+    if (verse === nextVerse) {
+      // Move to the first verse of the next chapter
+      currentReference = `${book}:${chapter + 1}.1`;
+    } else {
+      // Move to the next verse in the same chapter
+      currentReference = `${book}:${chapter}.${verse + 1}`;
+    }
+
+    await fetchData(currentReference);
+  }
+
+  async function getLastVerse(book, chapter) {
+    const res = await fetch(`https://labs.bible.org/api/?passage=${book}${chapter}&type=json`);
+    const data = await res.json();
+    const lastVerse = data[data.length - 1].verse;
+    return lastVerse;
+  }
+
+  function handleKeyDown(event) {
+    if (event.key === "Enter") {
+      event.preventDefault();
+    }
+  }
+
+  // Initial fetch for Genesis 1:1
+  fetchData("Genesis 1:1");
+</script>
+</body>
+</html>
