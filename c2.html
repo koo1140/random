@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Bible Verse Explanation</title>
+</head>
+<body>
+  <div>
+    <textarea id="inputText" rows="4" cols="50">Enter Bible verse here...</textarea>
+    <button onclick="explainVerse()">Explain</button>
+  </div>
+  <div id="output"></div>
+
+<script>
+async function explainVerse() {
+  const inputVerse = document.getElementById("inputText").value.trim();
+  
+  // Fetch Bible verse explanation
+  const verseResponse = await fetch(`https://labs.bible.org/api/?passage=${inputVerse}&type=json`);
+  const verseData = await verseResponse.json();
+  const verseText = verseData[0]?.text || "Verse not found";
+
+  // Make an AJAX request to the Gradio server
+  const xhr = new XMLHttpRequest();
+  xhr.open("POST", "https://wop-7b-opengpt-v0.hf.space/chat", true);
+  xhr.setRequestHeader("Content-Type", "application/json");
+  xhr.onreadystatechange = function() {
+    if (xhr.readyState === 4 && xhr.status === 200) {
+      const response = JSON.parse(xhr.responseText);
+      const aiResponse = response.generated_text;
+      const output = `Bible Verse: ${inputVerse}<br><br>Bible Verse Explanation: ${verseText}<br><br>AI Explanation: ${aiResponse}`;
+      document.getElementById("output").innerHTML = output;
+    }
+  };
+  const data = JSON.stringify({
+    "input_text": inputVerse,
+    "temperature": 0.7,
+    "max_new_tokens": 256,
+    "top_p": 0.9,
+    "repetition_penalty": 1.5
+  });
+  xhr.send(data);
+}
+</script>
+</body>
+</html>
