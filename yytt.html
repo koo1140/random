@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>???</title>
+<style>
+  html, body {
+    margin: 0;
+    padding: 0;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background-color: white; /* Sets the initial background color to white */
+    color: green; /* Sets the text color to green */
+    font-family: 'Courier New', Courier, monospace; /* Sets the font to a pixelated style */
+  }
+
+  .fullscreen {
+    background-color: black; /* Changes the background color to black in fullscreen mode */
+  }
+
+  #textBox {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    overflow: auto;
+    border: none;
+    resize: none;
+    background-color: transparent;
+    color: inherit;
+    font-family: inherit;
+    font-size: 14px;
+    scrollbar-width: none; /* Hide the scrollbar in Firefox */
+    -ms-overflow-style: none; /* Hide the scrollbar in Internet Explorer and Edge */
+  }
+
+  #textBox::-webkit-scrollbar {
+    display: none; /* Hide the scrollbar in Webkit browsers */
+  }
+</style>
+</head>
+<body>
+<button id="openButton">Open</button>
+<!-- Your content goes here -->
+<script>
+  document.getElementById("openButton").addEventListener("click", function() {
+    setTimeout(function() {
+      const element = document.documentElement;
+      const requestFullscreen = element.requestFullscreen || element.mozRequestFullScreen || element.webkitRequestFullScreen || element.msRequestFullscreen;
+
+      if (requestFullscreen) {
+        requestFullscreen.call(element);
+        document.body.classList.add("fullscreen"); // Add class to change background color
+      }
+
+      // Remove the button after it's clicked
+      document.getElementById("openButton").remove();
+
+      // Create the textarea for typing
+      const textBox = document.createElement("textarea");
+      textBox.id = "textBox";
+      textBox.setAttribute("readonly", true);
+      document.body.appendChild(textBox);
+
+      // Start typing random characters in the textarea
+      const characters = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*()_-+={[}]|;:,.<>?";
+      const interval = setInterval(function() {
+        let newText = "";
+        for (let i = 0; i < 10; i++) {
+          newText += characters.charAt(Math.floor(Math.random() * characters.length));
+        }
+        textBox.value += newText;
+        textBox.scrollTop = textBox.scrollHeight; // Scroll to bottom
+      }, 1); // 5 characters every 1 millisecond
+
+    }, 100); // Delay of 100 milliseconds
+  });
+</script>
+</body>
+</html>
