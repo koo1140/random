@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Countdown Timer</title>
+<style>
+body {
+  font-family: 'Comic Sans MS', cursive;
+  text-align: center;
+  background-color: #121212; /* Dark background color */
+  color: #ffffff; /* White text */
+  padding: 2.5vw;
+  margin: 0;
+}
+
+h1 {
+  font-size: calc(2.5vw + 10px); /* Bigger heading */
+  margin-bottom: 1.5vw;
+}
+
+label, input, button {
+  font-family: 'Comic Sans MS', cursive;
+  font-size: calc(1.5vw + 5px); /* Bigger text size */
+  background-color: #333; /* Dark background for inputs and buttons */
+  color: #ffffff; /* White text for inputs and buttons */
+  border: none;
+  padding: 1vw 2vw;
+  margin: 1vw;
+  cursor: pointer;
+}
+
+input[type="number"] {
+  width: 5vw;
+  text-align: center;
+}
+
+#timer {
+  font-size: calc(5vw + 20px); /* Bigger countdown timer */
+  margin-bottom: 2vw;
+  user-select: none; /* Prevent text selection */
+}
+
+div.container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+div.controls {
+  margin-bottom: 2vw;
+}
+
+.timer-inputs {
+  display: flex;
+  justify-content: center;
+  align-items: baseline; /* Align items at the baseline */
+  margin-bottom: 1vw;
+}
+
+.timer-inputs label,
+.timer-inputs input[type="number"],
+.timer-inputs span {
+  margin: 0 0.5vw;
+  font-size: calc(1.5vw + 5px);
+}
+
+.timer-inputs span {
+  width: 2vw;
+  text-align: center;
+}
+</style>
+</head>
+<body>
+<h1>Countdown Timer</h1>
+
+<div class="container">
+  <div class="controls">
+    <div class="timer-inputs">
+      <label for="hours">Hours:</label>
+      <label for="minutes">Minutes:</label>
+      <label for="seconds">Seconds:</label>
+    </div>
+    <div class="timer-inputs">
+      <input type="number" id="hours" min="0" value="0">
+      <span>:</span>
+      <input type="number" id="minutes" min="0" max="59" value="5">
+      <span>:</span>
+      <input type="number" id="seconds" min="0" max="59" value="0">
+    </div>
+  </div>
+
+  <div class="controls">
+    <button onclick="startCountdown()">Start</button>
+    <button onclick="pauseResumeCountdown()">Pause / Resume</button>
+    <button onclick="resetTimer()">Reset</button>
+  </div>
+
+  <div id="timer" onclick="enableEdit()">00:00:00</div>
+</div>
+
+
+<script>
+var colorIndex = 0;
+var colorInterval;
+var countdownInterval;
+var paused = false;
+
+function startCountdown() {
+  var hours = parseInt(document.getElementById('hours').value);
+  var minutes = parseInt(document.getElementById('minutes').value);
+  var seconds = parseInt(document.getElementById('seconds').value);
+  var totalSeconds = hours * 3600 + minutes * 60 + seconds;
+  
+  if (totalSeconds > 0) {
+    document.cookie = "countdown=" + totalSeconds + ";expires=Wed, 1 Jan 2025 12:00:00 UTC; path=/";
+    countdown();
+  } else {
+    alert("Please set a valid time.");
+  }
+}
+
+function countdown() {
+  countdownInterval = setInterval(function() {
+    if (!paused) {
+      var remainingSeconds = parseInt(getCookie('countdown'));
+      
+      if (remainingSeconds <= 0) {
+        clearInterval(countdownInterval);
+        document.getElementById('timer').textContent = 'Time\'s up!';
+        smoothBackgroundColorChange();
+        return;
+      }
+      
+      var hours = Math.floor(remainingSeconds / 3600);
+      var minutes = Math.floor((remainingSeconds % 3600) / 60);
+      var seconds = remainingSeconds % 60;
+      
+      document.getElementById('timer').textContent = formatTime(hours) + ':' + formatTime(minutes) + ':' + formatTime(seconds);
+      
+      remainingSeconds--;
+      document.cookie = "countdown=" + remainingSeconds + ";expires=Wed, 1 Jan 2025 12:00:00 UTC; path=/";
+    }
+  }, 1000);
+}
+
+function pauseResumeCountdown() {
+  paused = !paused;
+  if (paused) {
+    clearInterval(countdownInterval);
+  } else {
+    countdown();
+  }
+}
+
+function resetTimer() {
+  clearInterval(countdownInterval);
+  clearInterval(colorInterval);
+  document.cookie = "countdown=;expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/";
+  document.getElementById('timer').textContent = '00:00:00';
+  document.body.style.backgroundColor = '#121212'; // Dark background color
+}
+
+function enableEdit() {
+  var timer = document.getElementById('timer');
+  timer.contentEditable = true;
+  timer.focus();
+}
+
+function getCookie(name) {
+  var value = "; " + document.cookie;
+  var parts = value.split("; " + name + "=");
+  if (parts.length == 2) return parts.pop().split(";").shift();
+}
+
+function formatTime(time) {
+  return (time < 10 ? '0' : '') + time;
+}
+
+function smoothBackgroundColorChange() {
+  colorInterval = setInterval(function() {
+    var hue = (colorIndex * 15) % 360; // Increase hue by 15 degrees (15 * 6 = 90 degrees per second)
+    document.body.style.backgroundColor = 'hsl(' + hue + ', 100%, 50%)';
+    colorIndex = (colorIndex + 1) % 24; // 360 degrees / 15 degrees
+  }, 100); // Change color every 100 milliseconds
+}
+
+// Check if there's a countdown stored in cookies and start it
+var storedCountdown = getCookie('countdown');
+if (storedCountdown && parseInt(storedCountdown) > 0) {
+  countdown();
+}
+
+</script>
+
+</body>
+</html>
