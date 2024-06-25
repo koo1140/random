@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Free Autocorrect Using LanguageTool API</title>
+    <style>
+        body {
+            background-color: #222;
+            color: #fff;
+            font-family: Arial, sans-serif;
+            margin: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+        }
+
+        .container {
+            width: 80%;
+            max-width: 600px;
+            height: 80%;
+            background-color: #333;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.3);
+        }
+
+        textarea {
+            width: 100%;
+            height: 100%;
+            background-color: transparent;
+            border: none;
+            outline: none;
+            color: #fff;
+            font-size: 16px;
+            resize: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <textarea id="textInput" rows="10"></textarea>
+    </div>
+    <script>
+        const textInput = document.getElementById('textInput');
+        const apiEndpoint = 'https://api.languagetool.org/v2';
+
+        async function autocorrect(text) {
+            try {
+                const response = await fetch(`${apiEndpoint}/check`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/x-www-form-urlencoded'
+                    },
+                    body: `text=${encodeURIComponent(text)}&language=en-US&enabledOnly=false`
+                });
+
+                const data = await response.json();
+                if (data.matches) {
+                    let correctedText = text;
+                    for (const match of data.matches) {
+                        if (match.replacements && match.replacements.length > 0) {
+                            // Apply the first replacement found
+                            correctedText = correctedText.substring(0, match.offset) + match.replacements[0].value + correctedText.substring(match.offset + match.length);
+                        }
+                    }
+                    return correctedText;
+                } else {
+                    return text;
+                }
+            } catch (error) {
+                console.error('Error correcting text:', error);
+                return text;
+            }
+        }
+
+        let typingTimer;
+        const delay = 500; // Adjust delay as needed
+
+        textInput.addEventListener('input', function() {
+            clearTimeout(typingTimer);
+            typingTimer = setTimeout(async () => {
+                const text = this.value;
+                const correctedText = await autocorrect(text);
+                this.value = correctedText;
+            }, delay);
+        });
+    </script>
+</body>
+</html>
