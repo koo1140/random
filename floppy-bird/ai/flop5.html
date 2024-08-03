@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Flappy Bird</title>
+    <style>
+        body {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+            background-color: green;
+        }
+
+        #gameContainer {
+            position: relative;
+            width: 100%;
+            max-width: 500px;
+            height: 600px;
+            background-color: #70c5ce;
+            overflow: hidden;
+            border: 2px solid #000;
+        }
+
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+        }
+
+        #score {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            font-size: 24px;
+            color: #fff;
+        }
+
+        button {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            padding: 10px 20px;
+            font-size: 18px;
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+    <div id="gameContainer">
+        <canvas id="gameCanvas"></canvas>
+        <div id="score"></div>
+        <button id="startButton">Start</button>
+        <button id="restartButton" style="display: none;">Restart</button>
+    </div>
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+
+        canvas.width = 500;
+        canvas.height = 600;
+
+        const birdImg = new Image();
+        birdImg.src = 'https://image.pollinations.ai/prompt/flappy%20bird%20pixelart%20sprite?width=34&height=24&nologo=true';
+
+        const pipeImages = [
+            'https://image.pollinations.ai/prompt/tree1%20nature%20pixelart%20sprite?width=50&height=400&nologo=true',
+            'https://image.pollinations.ai/prompt/tree2%20nature%20pixelart%20sprite?width=50&height=400&nologo=true',
+            'https://image.pollinations.ai/prompt/tree3%20nature%20pixelart%20sprite?width=50&height=400&nologo=true'
+        ]; 
+
+        const bird = {
+            x: 50,
+            y: 150,
+            width: 34,
+            height: 24,
+            gravity: 0.1,
+            lift: -4,
+            velocity: 0
+        };
+
+        const pipes = [];
+        const pipeWidth = 50;
+        const pipeGap = 250;
+        let frameCount = 0;
+        let score = 0;
+        let gameStarted = false;
+
+        const startButton = document.getElementById('startButton');
+        const restartButton = document.getElementById('restartButton');
+        const scoreDisplay = document.getElementById('score');
+
+        document.addEventListener('keydown', () => {
+            if (gameStarted) {
+                bird.velocity = bird.lift;
+            }
+        });
+
+        startButton.addEventListener('click', startGame);
+        restartButton.addEventListener('click', resetGame);
+
+        function drawBird() {
+            ctx.drawImage(birdImg, bird.x, bird.y, bird.width, bird.height);
+        }
+
+        function updateBird() {
+            bird.velocity += bird.gravity;
+            bird.y += bird.velocity;
+
+            if (bird.y + bird.height > canvas.height || bird.y < 0) {
+                resetGame();
+            }
+        }
+
+        function drawPipes() {
+            pipes.forEach(pipe => {
+                const topImage = new Image();
+                const bottomImage = new Image();
+                topImage.src = pipe.topImage;
+                bottomImage.src = pipe.bottomImage;
+
+                ctx.drawImage(topImage, pipe.x, 0, pipeWidth, pipe.top);
+                ctx.drawImage(bottomImage, pipe.x, canvas.height - pipe.bottom, pipeWidth, pipe.bottom);
+            });
+        }
+
+        function updatePipes() {
+            if (frameCount % 100 === 0) {
+                const topPipeHeight = Math.random() * (canvas.height - pipeGap - 50) + 20;
+                const bottomPipeHeight = canvas.height - topPipeHeight - pipeGap;
+                const randomIndex = Math.floor(Math.random() * pipeImages.length);
+                pipes.push({
+                    x: canvas.width,
+                    top: topPipeHeight,
+                    bottom: bottomPipeHeight,
+                    topImage: pipeImages[randomIndex],
+                    bottomImage: pipeImages[randomIndex]
+                });
+            }
+
+            pipes.forEach(pipe => {
+                pipe.x -= 2;
+
+                if (pipe.x + pipeWidth < 0) {
+                    pipes.shift();
+                    score++;
+                    
+                }
+
+                if (
+                    bird.x < pipe.x + pipeWidth &&
+                    bird.x + bird.width > pipe.x &&
+                    (bird.y < pipe.top || bird.y + bird.height > canvas.height - pipe.bottom)
+                ) {
+                    resetGame();
+                }
+            });
+        }
+
+        function startGame() {
+            gameStarted = true;
+            startButton.style.display = 'none';
+            restartButton.style.display = 'none';
+            resetGame();
+            gameLoop();
+        }
+
+        function resetGame() {
+            bird.y = 150;
+            bird.velocity = 0;
+            pipes.length = 0;
+            score = 0;
+            frameCount = 0;
+            
+            restartButton.style.display = 'block';
+        }
+
+        function drawScore() {
+            ctx.fillStyle = '#fff';
+            ctx.font = '24px Arial';
+            ctx.fillText(`Score: ${score}`, 10, 30);
+        }
+
+        function gameLoop() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            if (gameStarted) {
+                drawBird();
+                updateBird();
+                drawPipes();
+                updatePipes();
+                drawScore();
+
+                frameCount++;
+                requestAnimationFrame(gameLoop);
+            }
+        }
+
+        birdImg.onload = () => {
+            startGame();
+        };
+    </script>
+</body>
+</html>
