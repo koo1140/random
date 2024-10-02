@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Chat with Loader</title>
+    <script type="module" src="https://cdn.jsdelivr.net/npm/ldrs/dist/auto/chaoticOrbit.js"></script>
+    <script type="module" src="https://cdn.jsdelivr.net/npm/ldrs/dist/auto/mirage.js"></script>
+    <style>
+        body {
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            background-color: #121212; /* Dark background */
+            margin: 0;
+            font-family: Arial, sans-serif;
+            overflow: hidden; /* Prevent scrolling */
+        }
+
+        .input-container {
+            margin-bottom: 20px; /* Space between input and button */
+        }
+
+        .input-field {
+            width: 300px; /* Input field width */
+            height: 40px; /* Input field height */
+            border-radius: 20px; /* Rounded corners */
+            border: 1px solid #6fa7c3; /* Border color */
+            padding: 0 10px; /* Padding inside the input */
+            font-size: 16px; /* Input text size */
+            color: white; /* Text color */
+            background-color: rgba(30, 30, 30, 0.9); /* Semi-transparent background */
+            outline: none; /* Remove outline on focus */
+            transition: border 0.3s; /* Transition for border */
+        }
+
+        .input-field::placeholder {
+            color: #ccc; /* Placeholder color */
+        }
+
+        .input-field:focus {
+            border: 1px solid #fff; /* Change border color on focus */
+        }
+
+        .button {
+            position: relative;
+            width: 56px; /* FAB width */
+            height: 56px; /* FAB height */
+            background-color: #204255; /* Button color */
+            color: white; /* Text color */
+            border: none;
+            border-radius: 50%; /* Rounded button */
+            font-size: 16px;
+            cursor: pointer;
+            overflow: hidden; /* Ensures loader stays within button */
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.2); /* Shadow for depth */
+            transition: transform 0.5s ease, opacity 0.5s ease; /* Add transition effects */
+            z-index: 10; /* Ensure button is above other elements */
+        }
+
+        .button:hover {
+            background-color: #305c73; /* Lighter button color on hover */
+        }
+
+        .loader {
+            display: none; /* Hidden by default */
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+        }
+
+        .button .text {
+            display: inline; /* Show text by default */
+        }
+
+        .button.loading .text {
+            display: none; /* Hide text when loading */
+        }
+
+        .frame {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 56px; /* Start with button width */
+            height: 56px; /* Start with button height */
+            background-color: rgba(30, 30, 30, 0.9); /* Semi-transparent background for better visibility */
+            border: 2px solid #6fa7c3; /* Border for the frame */
+            border-radius: 10px; /* Round corners for frame */
+            box-shadow: 0 2px 20px rgba(0, 0, 0, 0.5); /* Stronger shadow */
+            transform: translate(-50%, -50%); /* Center the frame */
+            display: flex; /* Center the loader */
+            justify-content: center;
+            align-items: center;
+            opacity: 0; /* Start hidden for smooth transition */
+            transition: opacity 0.5s ease, width 0.5s ease, height 0.5s ease; /* Fade in and size transitions */
+            z-index: 5; /* Ensure frame is below the button */
+        }
+
+        .frame.active {
+            opacity: 1; /* Make the frame visible */
+            width: 50vw; 
+            height: 50vh; 
+        }
+
+        .frame-loader {
+            display: none; /* Hidden by default */
+            opacity: 1; /* Start fully visible */
+            transition: opacity 0.5s ease; /* Fade effect */
+        }
+
+        /* New styles for title */
+        .title {
+            display: inline-block; /* Make title inline-block to control width */
+            color: white; /* Text color */
+            font-size: 2em; /* Title font size */
+            text-align: center; /* Center the title */
+            opacity: 0; /* Start hidden for smooth transition */
+            width: 0; /* Start with width 0 for the wipe effect */
+            overflow: hidden; /* Ensure the overflow is hidden for the wipe effect */
+            white-space: nowrap; /* Prevent line break */
+            animation-duration: 2s; /* Increased animation duration */
+            animation-fill-mode: forwards; /* Maintain the final state of the animation */
+            animation-timing-function: ease; /* Animation timing */
+        }
+
+        .wipe {
+            animation-name: wipe; /* Name of the animation */
+        }
+
+        @keyframes wipe {
+            to {
+                width: 100%; /* Expand to full width */
+                opacity: 1; /* Fade in */
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="input-container">
+        <input type="text" id="inputField" class="input-field" placeholder="Enter a fact to check" />
+    </div>
+    <button class="button" id="loaderButton">
+        <span class="text"><strong>▶</strong></span> <!-- Button text/icon -->
+        <l-chaotic-orbit
+            class="loader"
+            size="45"
+            speed="1.5"
+            color="#6fa7c3">
+        </l-chaotic-orbit>
+        <l-mirage
+            class="frame-loader"
+            size="280" 
+            speed="3.7" 
+            color="white">
+        </l-mirage>
+    </button>
+
+    <script>
+        const apiKey = 'zynx_test'; // Your API key here
+
+        const button = document.getElementById('loaderButton');
+        const loader = button.querySelector('.loader');
+        const frameLoader = button.querySelector('.frame-loader');
+        const text = button.querySelector('.text');
+        const inputField = document.getElementById('inputField');
+
+        button.addEventListener('click', async () => {
+            const message = inputField.value.trim(); // Get input value
+
+            if (!message) {
+                alert("Please enter a fact to check."); // Alert if input is empty
+                return;
+            }
+
+            button.classList.add('loading'); // Add loading class
+            loader.style.display = 'block'; // Show loader
+            button.disabled = true; // Disable button while loading
+
+            // Simulate loading for 3 seconds
+            setTimeout(async () => {
+                loader.style.display = 'none'; // Hide loader
+
+                // Create the frame
+                const frame = document.createElement('div');
+                frame.className = 'frame'; // Set class for styling
+                frameLoader.style.display = 'block'; // Show frame loader
+                frame.appendChild(frameLoader); // Add the loader to the frame
+
+                // Create title element
+                const title = document.createElement('div');
+                title.className = 'title'; // Set class for styling
+                title.textContent = 'AI Response'; // Set title text
+                frame.appendChild(title); // Add title to the frame
+
+                document.body.appendChild(frame); // Add the frame to the body
+
+                // Start the transform to the frame
+                button.style.transition = 'transform 0.5s ease, opacity 0.5s ease'; // Enable transition
+                button.style.transform = 'scale(0)'; // Scale down to zero
+                button.style.opacity = '0'; // Fade out the button
+
+                // Start with the frame at the button's size
+                setTimeout(() => {
+                    frame.classList.add('active'); // Activate the frame for fading effect
+                }, 500); // Delay to ensure button is fully transitioned before expanding frame
+
+                // Hide the button after transformation
+                setTimeout(() => {
+                    button.style.display = 'none'; // Hide the button after fade out
+                }, 500); // Match the timeout with the transition duration
+
+                // Make API request to get AI response
+                try {
+                    const postData = {
+                        model: 'llama3.1-70b',
+                        messages: [
+                            {
+                                role: 'user',
+                                content: message
+                            }
+                        ],
+                        max_tokens: 100,
+                        temperature: 0.5
+                    };
+
+                    const apiResponse = await fetch('https://zynx.milosantos.com/v1/chat/completions', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${apiKey}`
+                        },
+                        body: JSON.stringify(postData)
+                    });
+
+                    const responseData = await apiResponse.json();
+
+                    // Extract and display the AI's response
+                    let reply;
+                    if (responseData.choices && responseData.choices[0].message && responseData.choices[0].message.content) {
+                        reply = responseData.choices[0].message.content;
+                    } else {
+                        reply = "No response from the AI.";
+                    }
+
+                    // Add the AI response to the frame
+                    const responseText = document.createElement('div');
+                    responseText.style.color = 'white'; // Set response text color
+                    responseText.textContent = reply; // Set response text
+                    frame.appendChild(responseText); // Add response to the frame
+
+                    // Fade out frame loader and show title after 1.5 seconds
+                    setTimeout(() => {
+                        frameLoader.style.opacity = '0'; // Start fade out
+                        // After the fade out duration
+                        setTimeout(() => {
+                            frameLoader.style.display = 'none'; // Hide frame loader
+
+                            // Start the title wipe animation after the frame loader is fully hidden
+                            title.style.animation = 'wipe 2s forwards'; // Trigger wipe animation with increased duration
+                        }, 500); // Match this with the transition duration
+                    }, 1500); // Delay before starting fade out
+                } catch (error) {
+                    console.error('Error:', error);
+                    alert("An error occurred while fetching AI response.");
+                }
+
+            }, 1500); // Simulate loading time
+        });
+    </script>
+</body>
+</html>
