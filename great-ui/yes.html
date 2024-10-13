@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Image Link Generator</title>
+    <style>
+        /* Basic Reset */
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: Arial, sans-serif;
+            background: linear-gradient(45deg, rgba(26, 1, 117, 0.7), rgba(225, 5, 34, 0.7)), url('https://superdevresources.com/wp-content/uploads/2015/12/new-york-background.jpg') no-repeat center center fixed;
+            background-size: cover;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            color: rgba(255, 255, 255, 0.9);
+        }
+
+        /* Glassmorphism Panel */
+        .glass-panel {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 20px;
+            backdrop-filter: blur(10px);
+            padding: 20px;
+            width: 90%;
+            max-width: 500px;
+            box-shadow: 0 4px 30px rgba(0, 0, 0, 0.5);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        /* Neumorphism Inputs */
+        input[type="text"],
+        input[type="number"],
+        button {
+            width: 100%;
+            padding: 15px;
+            border: none;
+            border-radius: 10px;
+            margin: 10px 0;
+            background-color: rgba(255, 255, 255, 0.2);
+            color: #b9bbbe;
+            font-size: 1rem;
+            box-shadow: 3px 3px 8px rgba(0, 0, 0, 0.1), 
+                        -3px -3px 8px rgba(255, 255, 255, 0.5);
+            transition: background-color 0.3s ease, box-shadow 0.3s ease;
+        }
+
+        input:focus,
+        button:hover {
+            outline: none;
+            background-color: rgba(255, 255, 255, 0.3);
+            box-shadow: 3px 3px 12px rgba(0, 0, 0, 0.2), 
+                        -3px -3px 12px rgba(255, 255, 255, 0.7);
+        }
+
+        button {
+            background-color: rgba(225, 5, 34, 0.5);
+            color: white;
+            cursor: pointer;
+        }
+
+        button:hover {
+            background-color: rgba(225, 5, 34, 0.8);
+        }
+
+        .output-section {
+            margin-top: 20px;
+            text-align: center;
+        }
+
+        img {
+            max-width: 100%;
+            height: auto;
+            margin-top: 10px;
+            border-radius: 10px;
+        }
+
+        @media (max-width: 600px) {
+            .glass-panel {
+                width: 100%;
+                padding: 15px;
+            }
+
+            input[type="text"],
+            input[type="number"],
+            button {
+                font-size: 0.9rem;
+            }
+        }
+    </style>
+</head>
+<body>
+
+<div class="glass-panel">
+    <h1>Image Link Generator</h1>
+
+    <label for="description">Enter Description:</label>
+    <input type="text" id="description" placeholder="e.g., a flower bouquet" required>
+
+    <label for="amount">Number of Links to Generate:</label>
+    <input type="number" id="amount" placeholder="e.g., 5" min="1" required>
+
+    <button id="generate-button">Generate Links</button>
+
+    <div class="output-section" id="output-section">
+        <h2>Generated Links and Images:</h2>
+        <div id="links-container"></div>
+    </div>
+</div>
+
+<script>
+    const apiKey = 'zynx_test';
+    const systemPrompt = 'You are an AI that generates image links for the specified description. Create image links that can be accessed directly using the following format: https://image.pollinations.ai/prompt/{description}?nologo=true, where {description} is a URL-encoded version of the input description. Generate the specified number of links.';
+
+    // Function to generate image links and display them
+    async function generateImageLinks() {
+        const description = document.getElementById('description').value;
+        const amount = parseInt(document.getElementById('amount').value, 10);
+
+        // Create the user prompt for image generation
+        const userPrompt = `description: ${description} ,n of links: ${amount} now genearte.`;
+
+        // Prepare post data
+        const postData = {
+            model: 'llama3.1-70b',
+            messages: [
+                {
+                    role: 'system',
+                    content: systemPrompt
+                },
+                {
+                    role: 'user',
+                    content: userPrompt
+                }
+            ],
+            max_tokens: 100,
+            temperature: 0.5
+        };
+
+        try {
+            // Make the API request
+            const apiResponse = await fetch('https://zynx.milosantos.com/v1/chat/completions', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${apiKey}`
+                },
+                body: JSON.stringify(postData)
+            });
+
+            const responseData = await apiResponse.json();
+
+            // Extract response
+            let reply;
+            if (responseData.choices && responseData.choices[0].message && responseData.choices[0].message.content) {
+                reply = responseData.choices[0].message.content;
+            } else {
+                reply = "No response from the AI.";
+            }
+
+            // Generate links and display images
+            generateLinks(reply, amount);
+
+        } catch (error) {
+            console.error('Error:', error);
+            document.getElementById('links-container').innerHTML = 'Error: ' + error.message;
+        }
+    }
+
+    // Function to generate links based on AI response
+    function generateLinks(reply, amount) {
+        const linksContainer = document.getElementById('links-container');
+        linksContainer.innerHTML = ''; // Clear previous output
+
+        // Split the reply into individual lines for link generation
+        const lines = reply.split('\n').filter(line => line.trim());
+
+        // Limit the number of links generated to the user-specified amount
+        const numLinksToGenerate = Math.min(lines.length, amount);
+
+        for (let i = 0; i < numLinksToGenerate; i++) {
+            const line = lines[i].trim();
+            const description = line.replace(/\s+/g, '%20'); // Encode spaces for URL
+
+            // Create image link
+            const imageLink = `${description}`;
+
+            // Create HTML elements to display the link and image
+            const linkElement = document.createElement('div');
+            linkElement.innerHTML = `<a href="${imageLink}" target="_blank" style="color: #ffffff; text-decoration: underline;">${imageLink}</a>`;
+            const imgElement = document.createElement('img');
+            imgElement.src = imageLink;
+
+            linksContainer.appendChild(linkElement);
+            linksContainer.appendChild(imgElement);
+        }
+    }
+
+    // Add event listener to the button
+    document.getElementById('generate-button').addEventListener('click', generateImageLinks);
+</script>
+
+</body>
+</html>
