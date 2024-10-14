@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pixel Art Drawer</title>
+    <style>
+        body {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            margin: 0;
+            font-family: Arial, sans-serif;
+        }
+
+        #canvas {
+            border: 1px solid black;
+            display: grid;
+            grid-template-columns: repeat(10, 1fr); /* Increased grid size to 10x10 */
+            grid-template-rows: repeat(10, 1fr);
+            width: 400px; /* Adjusted width for larger pixels */
+            height: 400px; /* Adjusted height for larger pixels */
+        }
+
+        .pixel {
+            width: 40px; /* Increased pixel size */
+            height: 40px; /* Increased pixel size */
+            border: 1px solid #ccc;
+            box-sizing: border-box;
+            cursor: pointer;
+        }
+
+        .selected {
+            /* Background color based on selected palette */
+        }
+
+        #controls {
+            margin-top: 10px;
+            text-align: center;
+        }
+
+        #color-palette {
+            margin: 10px 0;
+        }
+
+        .color {
+            width: 30px;
+            height: 30px;
+            display: inline-block;
+            cursor: pointer;
+            border: 1px solid #000;
+        }
+
+        #code-output {
+            margin-top: 10px;
+            white-space: pre-wrap; /* Preserve white space */
+            border: 1px solid #ccc;
+            padding: 10px;
+            max-height: 200px;
+            overflow-y: auto; /* Add scroll if text is too long */
+            text-align: left;
+        }
+    </style>
+</head>
+<body>
+
+<h1>Draw Your Pixel Art</h1>
+<div id="canvas"></div>
+<div id="controls">
+    <label for="color-select">Select Color:</label>
+    <div id="color-palette">
+        <div class="color" style="background-color: red;" data-color="red"></div>
+        <div class="color" style="background-color: green;" data-color="green"></div>
+        <div class="color" style="background-color: blue;" data-color="blue"></div>
+        <div class="color" style="background-color: yellow;" data-color="yellow"></div>
+        <div class="color" style="background-color: lightblue;" data-color="light_blue"></div>
+        <div class="color" style="background-color: white;" data-color="white"></div>
+        <div class="color" style="background-color: black;" data-color="black"></div>
+    </div>
+    <button id="generate-code">Generate Code</button>
+</div>
+<pre id="code-output"></pre>
+
+<script>
+    const canvas = document.getElementById('canvas');
+    const codeOutput = document.getElementById('code-output');
+    const generateButton = document.getElementById('generate-code');
+
+    let selectedColor = 'black'; // Default selected color
+
+    // Create the pixel grid (10x10)
+    for (let i = 0; i < 100; i++) {
+        const pixel = document.createElement('div');
+        pixel.className = 'pixel';
+        pixel.addEventListener('click', function () {
+            pixel.style.backgroundColor = selectedColor; // Set the pixel's background to the selected color
+        });
+        canvas.appendChild(pixel);
+    }
+
+    // Create the color palette
+    const colors = document.querySelectorAll('.color');
+    colors.forEach(color => {
+        color.addEventListener('click', function () {
+            selectedColor = this.getAttribute('data-color'); // Get the selected color
+            resetColorPalette(); // Reset color palette
+            this.style.border = '2px solid #000'; // Highlight selected color
+        });
+    });
+
+    // Reset color palette border
+    function resetColorPalette() {
+        colors.forEach(color => {
+            color.style.border = '1px solid #000'; // Reset all borders
+        });
+    }
+
+    // Generate the JSON code snippet from pixel data
+    generateButton.addEventListener('click', function () {
+        const pixels = document.querySelectorAll('.pixel');
+        const pixelData = [];
+        const name = prompt("Enter name for your drawing (e.g., 'apple'):", "apple"); // Prompt for name
+
+        pixels.forEach((pixel, index) => {
+            if (pixel.style.backgroundColor === selectedColor) {
+                const x = index % 10; // X coordinate
+                const y = Math.floor(index / 10); // Y coordinate
+                pixelData.push([x, y]);
+            }
+        });
+
+        // Generate JSON format
+        const jsonOutput = {
+            "name": name,
+            "pixels": pixelData,
+            "background": "white", // Default background color
+            "color": selectedColor
+        };
+
+        codeOutput.textContent = JSON.stringify(jsonOutput, null, 4); // Format JSON for output
+    });
+</script>
+
+</body>
+</html>
