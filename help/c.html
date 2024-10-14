@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pixel Art Creator</title>
+    <style>
+        body {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            background-color: #f0f0f0;
+            font-family: Arial, sans-serif;
+        }
+
+        #grid {
+            display: grid;
+            grid-template-columns: repeat(5, 60px); /* Larger grid cells */
+            grid-template-rows: repeat(5, 60px);    /* Larger grid cells */
+            gap: 2px;
+            margin-bottom: 20px;
+        }
+
+        .pixel {
+            width: 60px;
+            height: 60px;
+            border: 1px solid #ccc;
+            cursor: pointer;
+        }
+
+        #colorPalette {
+            display: flex;
+            margin-bottom: 20px;
+        }
+
+        .color {
+            width: 40px;
+            height: 40px;
+            border: 2px solid transparent;
+            margin-right: 5px;
+            cursor: pointer;
+        }
+
+        .selected {
+            border-color: black;
+        }
+
+        button {
+            padding: 10px 20px;
+            font-size: 16px;
+            margin-bottom: 10px;
+        }
+
+        #output {
+            margin-top: 20px;
+            background-color: white;
+            border: 1px solid #ccc;
+            padding: 10px;
+            width: 80%;
+            white-space: pre-wrap; /* Preserve formatting */
+            word-wrap: break-word; /* Wrap long lines */
+        }
+    </style>
+</head>
+<body>
+
+    <h1>Pixel Art Creator</h1>
+    <input type="text" id="titleInput" placeholder="Enter title" style="padding: 10px; width: 80%; margin-bottom: 20px;" />
+    <div id="colorPalette">
+        <div class="color" style="background-color: red;" onclick="selectColor('red')"></div>
+        <div class="color" style="background-color: green;" onclick="selectColor('green')"></div>
+        <div class="color" style="background-color: blue;" onclick="selectColor('blue')"></div>
+        <div class="color" style="background-color: yellow;" onclick="selectColor('yellow')"></div>
+        <div class="color" style="background-color: white;" onclick="selectColor('white')"></div>
+        <div class="color" style="background-color: black;" onclick="selectColor('black')"></div>
+        <div class="color" style="background-color: brown;" onclick="selectColor('brown')"></div>
+        <div class="color" style="background-color: purple;" onclick="selectColor('purple')"></div>
+    </div>
+
+    <div id="grid"></div>
+    <button onclick="generateData()">Generate Data</button>
+    
+    <div id="output"></div>
+
+    <script>
+        const grid = document.getElementById('grid');
+        let selectedColor = 'red'; // Default selected color
+        const pixels = []; // Store pixel coordinates
+
+        // Create a 5x5 grid
+        for (let i = 0; i < 25; i++) {
+            const pixel = document.createElement('div');
+            pixel.classList.add('pixel');
+            pixel.addEventListener('click', function() {
+                this.style.backgroundColor = selectedColor;
+                const x = i % 5; // Get x coordinate
+                const y = Math.floor(i / 5); // Get y coordinate
+                if (!pixels.some(pixel => pixel[0] === x && pixel[1] === y)) {
+                    pixels.push([x, y]); // Store pixel coordinates
+                }
+            });
+            grid.appendChild(pixel);
+        }
+
+        // Color selection function
+        function selectColor(color) {
+            selectedColor = color;
+            const colors = document.querySelectorAll('.color');
+            colors.forEach(c => c.classList.remove('selected'));
+            event.target.classList.add('selected');
+        }
+
+        // Generate JSON data
+        function generateData() {
+            const title = document.getElementById('titleInput').value || 'pixel_art';
+            const uniquePixels = [...new Set(pixels.map(JSON.stringify))].map(JSON.parse); // Ensure unique pixels
+            const data = {
+                name: title,
+                pixels: uniquePixels,
+                background: 'light_blue',
+                color: selectedColor
+            };
+            const output = JSON.stringify(data);
+            document.getElementById('output').innerText = output; // Display output as text on page
+        }
+    </script>
+</body>
+</html>
