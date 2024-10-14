@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pixel Art Drawer</title>
+    <style>
+        #canvas {
+            border: 1px solid black;
+            width: 50px;
+            height: 50px;
+            display: grid;
+            grid-template-columns: repeat(5, 1fr);
+        }
+        .pixel {
+            width: 10px;
+            height: 10px;
+            border: 1px solid #ccc;
+            box-sizing: border-box;
+        }
+        .selected {
+            background-color: black;
+        }
+        #controls {
+            margin-top: 10px;
+        }
+        #code-output {
+            margin-top: 10px;
+            white-space: pre-wrap; /* Preserve white space */
+            border: 1px solid #ccc;
+            padding: 10px;
+            max-height: 200px;
+            overflow-y: auto; /* Add scroll if text is too long */
+        }
+    </style>
+</head>
+<body>
+
+<h1>Draw Your Pixel Art</h1>
+<div id="canvas"></div>
+<div id="controls">
+    <button id="save">Save Image</button>
+    <button id="copy-code">Copy Code</button>
+</div>
+<pre id="code-output"></pre>
+
+<script>
+    const canvas = document.getElementById('canvas');
+    const codeOutput = document.getElementById('code-output');
+    const saveButton = document.getElementById('save');
+    const copyButton = document.getElementById('copy-code');
+
+    // Create the pixel grid
+    for (let i = 0; i < 25; i++) {
+        const pixel = document.createElement('div');
+        pixel.className = 'pixel';
+        pixel.addEventListener('click', function () {
+            pixel.classList.toggle('selected');
+        });
+        canvas.appendChild(pixel);
+    }
+
+    // Save the drawn pixel art as an image
+    saveButton.addEventListener('click', function () {
+        const pixels = document.querySelectorAll('.pixel');
+        const imageData = [];
+
+        pixels.forEach((pixel) => {
+            imageData.push(pixel.classList.contains('selected') ? [0, 0, 0] : [255, 255, 255]);
+        });
+
+        const dataUrl = createImageDataUrl(imageData);
+
+        // Create a link element to download the image
+        const link = document.createElement('a');
+        link.href = dataUrl;
+        link.download = 'pixel_art.png'; // Set the name of the downloaded file
+        link.click();
+
+        // Generate the corresponding code snippet
+        const codeSnippet = generateCodeSnippet(imageData);
+        codeOutput.textContent = codeSnippet;
+    });
+
+    // Create an image data URL from pixel data
+    function createImageDataUrl(imageData) {
+        const canvas = document.createElement('canvas');
+        canvas.width = 5;
+        canvas.height = 5;
+        const ctx = canvas.getContext('2d');
+        const imageDataObj = ctx.createImageData(5, 5);
+
+        for (let i = 0; i < 25; i++) {
+            imageDataObj.data[i * 4] = imageData[i][0];     // R
+            imageDataObj.data[i * 4 + 1] = imageData[i][1]; // G
+            imageDataObj.data[i * 4 + 2] = imageData[i][2]; // B
+            imageDataObj.data[i * 4 + 3] = 255;              // A
+        }
+
+        ctx.putImageData(imageDataObj, 0, 0);
+        return canvas.toDataURL();
+    }
+
+    // Generate the code snippet from pixel data
+    function generateCodeSnippet(imageData) {
+        const codeLines = imageData.map((color) => `    [${color.join(', ')}]`);
+        return 'img = np.array([\n' + codeLines.join(',\n') + '\n])';
+    }
+
+    // Copy the generated code to clipboard
+    copyButton.addEventListener('click', function () {
+        const code = codeOutput.textContent;
+        navigator.clipboard.writeText(code).then(() => {
+            alert('Code copied to clipboard!');
+        });
+    });
+</script>
+
+</body>
+</html>
