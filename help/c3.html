@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pixel Art Renderer</title>
+    <style>
+        body {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            background-color: #f0f0f0;
+            font-family: Arial, sans-serif;
+        }
+
+        #grid {
+            display: grid;
+            grid-template-columns: repeat(5, 60px); /* Larger grid cells */
+            grid-template-rows: repeat(5, 60px);    /* Larger grid cells */
+            gap: 2px;
+            margin-bottom: 20px;
+        }
+
+        .pixel {
+            width: 60px;
+            height: 60px;
+            border: 1px solid #ccc;
+            cursor: pointer;
+        }
+
+        #output {
+            margin-top: 20px;
+            background-color: white;
+            border: 1px solid #ccc;
+            padding: 10px;
+            width: 80%;
+            white-space: pre-wrap; /* Preserve formatting */
+            word-wrap: break-word; /* Wrap long lines */
+        }
+
+        #urlInput {
+            width: 80%;
+            margin-bottom: 20px;
+            padding: 10px;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>Pixel Art Renderer</h1>
+    <input id="urlInput" type="text" placeholder="Enter URL to JSON data...">
+    <button onclick="fetchAndRenderImage()">Render Image</button>
+    
+    <div id="grid"></div>
+    <div id="output"></div>
+
+    <script>
+        const grid = document.getElementById('grid');
+
+        // Function to fetch JSON from URL and render the image
+        async function fetchAndRenderImage() {
+            // Clear the grid
+            grid.innerHTML = '';
+            
+            // Get URL input
+            const jsonUrl = document.getElementById('urlInput').value;
+
+            // Fetch JSON data from the URL
+            let data;
+            try {
+                const response = await fetch(jsonUrl);
+                if (!response.ok) {
+                    throw new Error('Network response was not ok');
+                }
+                data = await response.json();
+            } catch (error) {
+                alert('Error fetching JSON data: ' + error.message);
+                return;
+            }
+
+            // Check if the required properties exist
+            if (!data.pixels || !data.color || !data.background) {
+                alert('Missing required properties in JSON data.');
+                return;
+            }
+
+            // Create the grid
+            const pixels = data.pixels;
+            const backgroundColor = data.background;
+
+            // Create a 5x5 grid
+            for (let i = 0; i < 25; i++) {
+                const pixel = document.createElement('div');
+                pixel.classList.add('pixel');
+                pixel.style.backgroundColor = backgroundColor; // Set background color
+                grid.appendChild(pixel);
+            }
+
+            // Fill in the colored pixels
+            pixels.forEach(pixel => {
+                const [x, y] = pixel;
+                const index = y * 5 + x; // Calculate index
+                const pixelElement = grid.children[index];
+                pixelElement.style.backgroundColor = data.color; // Set color
+            });
+
+            // Output JSON data
+            document.getElementById('output').innerText = JSON.stringify(data, null, 2); // Display output as formatted JSON
+        }
+    </script>
+</body>
+</html>
