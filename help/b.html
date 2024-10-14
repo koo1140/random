@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pixel Art Creator</title>
+    <style>
+        body {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            background-color: #f0f0f0;
+            font-family: Arial, sans-serif;
+        }
+
+        #grid {
+            display: grid;
+            grid-template-columns: repeat(5, 60px); /* Larger grid cells */
+            grid-template-rows: repeat(5, 60px);    /* Larger grid cells */
+            gap: 2px;
+            margin-bottom: 20px;
+        }
+
+        .pixel {
+            width: 60px;
+            height: 60px;
+            border: 1px solid #ccc;
+            cursor: pointer;
+        }
+
+        #colorPalette {
+            display: flex;
+            margin-bottom: 20px;
+        }
+
+        .color {
+            width: 40px;
+            height: 40px;
+            border: 2px solid transparent;
+            margin-right: 5px;
+            cursor: pointer;
+        }
+
+        .selected {
+            border-color: black;
+        }
+
+        button {
+            padding: 10px 20px;
+            font-size: 16px;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>Pixel Art Creator</h1>
+    <div id="colorPalette">
+        <div class="color" style="background-color: red;" onclick="selectColor('red')"></div>
+        <div class="color" style="background-color: green;" onclick="selectColor('green')"></div>
+        <div class="color" style="background-color: blue;" onclick="selectColor('blue')"></div>
+        <div class="color" style="background-color: yellow;" onclick="selectColor('yellow')"></div>
+        <div class="color" style="background-color: light_blue;" onclick="selectColor('light_blue')"></div>
+        <div class="color" style="background-color: white;" onclick="selectColor('white')"></div>
+    </div>
+
+    <div id="grid"></div>
+    <button onclick="generateData()">Generate Data</button>
+
+    <script>
+        const grid = document.getElementById('grid');
+        let selectedColor = 'red'; // Default selected color
+        const pixels = []; // Store pixel coordinates
+
+        // Create a 5x5 grid
+        for (let i = 0; i < 25; i++) {
+            const pixel = document.createElement('div');
+            pixel.classList.add('pixel');
+            pixel.addEventListener('click', function() {
+                this.style.backgroundColor = selectedColor;
+                const x = i % 5; // Get x coordinate
+                const y = Math.floor(i / 5); // Get y coordinate
+                pixels.push([x, y]); // Store pixel coordinates
+            });
+            grid.appendChild(pixel);
+        }
+
+        // Color selection function
+        function selectColor(color) {
+            selectedColor = color;
+            const colors = document.querySelectorAll('.color');
+            colors.forEach(c => c.classList.remove('selected'));
+            event.target.classList.add('selected');
+        }
+
+        // Generate JSON data
+        function generateData() {
+            const uniquePixels = [...new Set(pixels.map(JSON.stringify))].map(JSON.parse); // Ensure unique pixels
+            const data = {
+                name: 'pixel_art',
+                pixels: uniquePixels,
+                background: 'light_blue',
+                color: selectedColor
+            };
+            console.log(JSON.stringify(data, null, 4));
+            alert('Check the console for the generated data!');
+        }
+    </script>
+</body>
+</html>
