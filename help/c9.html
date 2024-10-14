@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>JSON to URL Encoder</title>
+    <style>
+        body {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            background-color: #f0f0f0;
+            font-family: Arial, sans-serif;
+        }
+        #jsonInput {
+            width: 80%;
+            height: 100px;
+            margin-bottom: 20px;
+            padding: 10px;
+            font-size: 16px;
+        }
+        #generateButton {
+            padding: 10px 20px;
+            font-size: 16px;
+        }
+        #output {
+            margin-top: 20px;
+            padding: 10px;
+            background-color: white;
+            border: 1px solid #ccc;
+            width: 80%;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+        #previewLink {
+            margin-top: 10px;
+        }
+        #grid {
+            display: grid;
+            grid-template-columns: repeat(5, 60px);
+            grid-template-rows: repeat(5, 60px);
+            gap: 2px;
+            margin-top: 20px;
+        }
+        .pixel {
+            width: 60px;
+            height: 60px;
+            border: 1px solid #ccc;
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+    <h1>JSON to URL Encoder</h1>
+    <textarea id="jsonInput" placeholder='Enter your JSON here...'></textarea>
+    <button id="generateButton" onclick="generateLink()">Generate Link</button>
+    <div id="output"></div>
+    <a id="previewLink" href="#" target="_blank"></a>
+    <div id="grid" style="display:none;"></div>
+    <script>
+        function generateLink() {
+            const jsonInput = document.getElementById('jsonInput').value;
+            let jsonData;
+            try {
+                jsonData = JSON.parse(jsonInput);
+            } catch (error) {
+                alert('Invalid JSON input. Please correct it.');
+                return;
+            }
+            const encodedJson = btoa(JSON.stringify(jsonData));
+            const link = `${window.location.href.split('?')[0]}?data=${encodedJson}`;
+            document.getElementById('output').innerText = link;
+            document.getElementById('previewLink').href = link;
+            document.getElementById('previewLink').innerText = 'Click here to preview the pixel art';
+            document.getElementById('jsonInput').value = JSON.stringify(jsonData);
+        }
+
+        function renderPixelArt() {
+            const params = new URLSearchParams(window.location.search);
+            const encodedData = params.get('data');
+            if (encodedData) {
+                const jsonData = JSON.parse(atob(encodedData));
+                if (!jsonData.pixels || !jsonData.color || !jsonData.background) {
+                    alert('Missing required properties in JSON data.');
+                    return;
+                }
+                const grid = document.getElementById('grid');
+                grid.style.display = 'grid';
+                grid.innerHTML = '';
+                const pixels = jsonData.pixels;
+                const backgroundColor = jsonData.background;
+                for (let i = 0; i < 25; i++) {
+                    const pixel = document.createElement('div');
+                    pixel.classList.add('pixel');
+                    pixel.style.backgroundColor = backgroundColor;
+                    grid.appendChild(pixel);
+                }
+                pixels.forEach(pixel => {
+                    const [x, y] = pixel;
+                    const index = y * 5 + x;
+                    const pixelElement = grid.children[index];
+                    pixelElement.style.backgroundColor = jsonData.color;
+                });
+                grid.style.display = 'grid';
+                // Display JSON in one line
+                document.getElementById('jsonInput').value = JSON.stringify(jsonData);
+            }
+        }
+
+        window.onload = renderPixelArt;
+    </script>
+</body>
+</html>
