@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>spectrum</title>
+    <style>
+        body {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background-color: black;
+            color: white;
+        }
+        canvas {
+            width: 100%;
+            height: 300px;
+            background: #000;
+            margin-bottom: 20px;
+        }
+        button {
+            padding: 10px 20px;
+            margin: 5px;
+            cursor: pointer;
+            background-color: #333;
+            color: white;
+            border: none;
+            border-radius: 5px;
+        }
+        button:hover {
+            background-color: #555;
+        }
+        #timeDisplay {
+            margin-bottom: 20px;
+            font-size: 18px;
+        }
+        #ballCountSlider, #falseVolumeSlider {
+            width: 100%;
+            margin: 20px 0;
+        }
+        #dropArea {
+            border: 2px dashed #666;
+            padding: 20px;
+            text-align: center;
+            margin-bottom: 20px;
+            width: 90%;
+            cursor: pointer;
+        }
+        #dropArea.hover {
+            border-color: #fff;
+        }
+    </style>
+</head>
+<body>
+    <div id="dropArea">Drag and drop an MP3 file here or click to upload</div>
+    <input type="file" id="fileInput" accept="audio/mp3" style="display:none;">
+    <button id="playButton">Play</button>
+    <button id="pauseButton">Pause</button>
+    <div id="timeDisplay">
+        <span id="currentTime">0:00</span> / <span id="duration">0:00</span>
+    </div>
+    <canvas id="spectrumCanvas"></canvas>
+    <input type="range" id="ballCountSlider" min="2" max="100" value="18">
+    <label for="ballCountSlider">Ball Count: <span id="ballCountValue">18</span></label>
+    <input type="range" id="falseVolumeSlider" min="0" max="100" value="50">
+    <label for="falseVolumeSlider">Visual Amplification: <span id="falseVolumeValue">50</span>%</label>
+    
+    <script>
+        let deviceVolume = 1; // Default value if unable to fetch device volume
+let falseVolume = 0.5; // Initial false volume set to 50% as per slider default
+
+const falseVolumeSlider = document.getElementById('falseVolumeSlider');
+const falseVolumeValueDisplay = document.getElementById('falseVolumeValue');
+
+// Update false volume from slider
+falseVolumeSlider.addEventListener('input', function() {
+    falseVolume = this.value / 100;
+    falseVolumeValueDisplay.textContent = this.value;
+});
+
+// Mock fetch for device volume (simulating as true device volume control is restricted)
+function fetchDeviceVolume() {
+    // Example approach if user’s device volume were accessible (typically not due to browser limitations)
+    deviceVolume = 0.5; // Mocked value (50% device volume)
+}
+fetchDeviceVolume();
+
+function visualize() {
+    const bufferLength = analyser.frequencyBinCount;
+    const dataArray = new Uint8Array(bufferLength);
+
+    function draw() {
+        requestAnimationFrame(draw);
+        analyser.getByteFrequencyData(dataArray);
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        const radius = 2;
+        const spacing = canvas.width / numBalls;
+
+        const points = [];
+        for (let i = 0; i < numBalls; i++) {
+            const index = Math.floor(i * (bufferLength / numBalls));
+            const value = dataArray[index];
+            const height = (value / 255) * deviceVolume * falseVolume * (canvas.height - 20);
+            const x = (i + 1) * spacing;
+            const y = canvas.height - height;
+            points.push({ x, y, value });
+        }
+
+        for (let i = 0; i < points.length; i++) {
+            const point = points[i];
+            let ballColor = 'rgba(255, 255, 255, 0.5)';
+            if (point.value > 180) {
+                ballColor = 'rgba(255, 0, 0, 0.5)';
+            } else if (point.value > 100) {
+                ballColor = 'rgba(0, 0, 255, 0.5)';
+            }
+
+            ctx.beginPath();
+            ctx.arc(point.x, point.y, radius, 0, Math.PI * 2);
+            ctx.fillStyle = ballColor;
+            ctx.fill();
+            ctx.closePath();
+
+            if (i < points.length - 1) {
+                const nextPoint = points[i + 1];
+                let lineColor;
+                if (point.value > 180) {
+                    lineColor = interpolateColor(point.value, 255, [255, 0, 0], [255, 255, 255]);
+                } else if (point.value > 100) {
+                    lineColor = interpolateColor(point.value, 255, [0, 0, 255], [255, 255, 255]);
+                } else {
+                    lineColor = 'rgba(255, 255, 255, 0.8)';
+                }
+
+                ctx.strokeStyle = lineColor;
+                ctx.lineWidth = 1;
+                ctx.beginPath();
+                ctx.moveTo(point.x, point.y);
+                ctx.lineTo(nextPoint.x, nextPoint.y);
+                ctx.stroke();
+            }
+        }
+    }
+    draw();
+}
+
+    </script>
+</body>
+</html>
