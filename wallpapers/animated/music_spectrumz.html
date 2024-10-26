@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Responsive Audio Spectrum Visualizer</title>
+    <style>
+        body {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            font-family: Arial, sans-serif;
+            margin: 0;
+            background-color: black;
+            color: white;
+            overflow: hidden;
+        }
+        canvas {
+            background: #000;
+            margin-bottom: 20px;
+        }
+        button {
+            padding: 10px 20px;
+            margin: 5px;
+            cursor: pointer;
+            background-color: #333;
+            color: white;
+            border: none;
+            border-radius: 5px;
+        }
+        button:hover {
+            background-color: #555;
+        }
+        #timeDisplay {
+            margin-bottom: 20px;
+            font-size: 18px;
+        }
+        #ballCountSlider, #falseVolumeSlider {
+            width: 100%;
+            margin: 20px 0;
+        }
+        #dropArea {
+            border: 2px dashed #666;
+            padding: 20px;
+            text-align: center;
+            margin-bottom: 20px;
+            width: 90%;
+            cursor: pointer;
+        }
+        #dropArea.hover {
+            border-color: #fff;
+        }
+    </style>
+</head>
+<body>
+    <div id="dropArea">Drag and drop an MP3 file here or click to upload</div>
+    <input type="file" id="fileInput" accept="audio/mp3" style="display:none;">
+    <button id="playButton">Play</button>
+    <button id="pauseButton">Pause</button>
+    <div id="timeDisplay">
+        <span id="currentTime">0:00</span> / <span id="duration">0:00</span>
+    </div>
+    <canvas id="spectrumCanvas"></canvas>
+    <input type="range" id="ballCountSlider" min="2" max="100" value="18">
+    <label for="ballCountSlider">Ball Count: <span id="ballCountValue">18</span></label>
+    <input type="range" id="falseVolumeSlider" min="0" max="300" value="50">
+    <label for="falseVolumeSlider">Visual Amplification: <span id="falseVolumeValue">50</span>%</label>
+    
+    <script>
+        const fileInput = document.getElementById('fileInput');
+        const dropArea = document.getElementById('dropArea');
+        const playButton = document.getElementById('playButton');
+        const pauseButton = document.getElementById('pauseButton');
+        const currentTimeDisplay = document.getElementById('currentTime');
+        const durationDisplay = document.getElementById('duration');
+        const canvas = document.getElementById('spectrumCanvas');
+        const ctx = canvas.getContext('2d');
+        const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        let analyser = audioContext.createAnalyser();
+        let source;
+        let audioBuffer;
+        let isPlaying = false;
+        let currentTime = 0;
+        let duration = 0;
+        let numBalls = 18;
+        let deviceVolume = 1; // Placeholder as true device volume access is restricted
+        let falseVolume = 0.5; // Initial false volume (50% from slider)
+
+        // Responsive canvas sizing
+        function resizeCanvas() {
+            canvas.width = window.innerWidth * 0.9;
+            canvas.height = window.innerHeight * 0.5; // Make it half of the viewport height
+        }
+        resizeCanvas();
+
+        // Adjust canvas size on window resize
+        window.addEventListener('resize', resizeCanvas);
+
+        // File handling event listeners
+        fileInput.addEventListener('change', handleFileSelect);
+        dropArea.addEventListener('click', () => fileInput.click());
+        dropArea.addEventListener('dragover', (event) => {
+            event.preventDefault();
+            dropArea.classList.add('hover');
+        });
+        dropArea.addEventListener('dragleave', () => dropArea.classList.remove('hover'));
+        dropArea.addEventListener('drop', (event) => {
+            event.preventDefault();
+            dropArea.classList.remove('hover');
+            const file = event.dataTransfer.files[0];
+            if (file) {
+                handleFileSelect({ target: { files: [file] } });
+            }
+        });
+
+        // Ball count and false volume sliders
+        const ballCountSlider = document.getElementById('ballCountSlider');
+        const ballCountValueDisplay = document.getElementById('ballCountValue');
+        ballCountSlider.addEventListener('input', function() {
+            numBalls = this.value;
+            ballCountValueDisplay.textContent = numBalls;
+        });
+
+        const falseVolumeSlider = document.getElementById('falseVolumeSlider');
+        const falseVolumeValueDisplay = document.getElementById('falseVolumeValue');
+        falseVolumeSlider.addEventListener('input', function() {
+            falseVolume = this.value / 100;
+            falseVolumeValueDisplay.textContent = this.value;
+        });
+
+        // Load and play audio
+        function handleFileSelect(event) {
+            const file = event.target.files[0];
+            if (file && (file.type === 'audio/mpeg' || file.type === 'audio/mp3')) {
+                const fileURL = URL.createObjectURL(file);
+                loadAudio(fileURL);
+            } else {
+                alert('Please select a valid MP3 file.');
+            }
+        }
+
+        function loadAudio(fileURL) {
+            if (source) {
+                source.stop();
+                source.disconnect();
+            }
+            isPlaying = false;
+            currentTime = 0;
+            currentTimeDisplay.textContent = formatTime(currentTime);
+            durationDisplay.textContent = "0:00";
+            
+            fetch(fileURL)
+                .then(response => response.arrayBuffer())
+                .then(data => audioContext.decodeAudioData(data, buffer => {
+                    audioBuffer = buffer;
+                    duration = buffer.duration;
+                    durationDisplay.textContent = formatTime(duration);
+                }));
+        }
+
+        playButton.addEventListener('click', playAudio);
+        pauseButton.addEventListener('click', pauseAudio);
+
+        function playAudio() {
+            if (!isPlaying && audioBuffer) {
+                source = audioContext.createBufferSource();
+                source.buffer = audioBuffer;
+                source.connect(analyser);
+                analyser.connect(audioContext.destination);
+                source.start(0, currentTime);
+                isPlaying = true;
+                visualize();
+
+                source.onended = () => {
+                    isPlaying = false;
+                    currentTime = 0;
+                    currentTimeDisplay.textContent = formatTime(currentTime);
+                };
+
+                const updateCurrentTimeDisplay = () => {
+                    if (isPlaying) {
+                        currentTime = audioContext.currentTime;
+                        currentTimeDisplay.textContent = formatTime(currentTime);
+                        requestAnimationFrame(updateCurrentTimeDisplay);
+                    }
+                };
+                updateCurrentTimeDisplay();
+            }
+        }
+
+        function pauseAudio() {
+            if (source) {
+                source.stop();
+                isPlaying = false;
+                currentTime = audioContext.currentTime;
+            }
+        }
+
+        function formatTime(seconds) {
+            const minutes = Math.floor(seconds / 60);
+            const secs = Math.floor(seconds % 60);
+            return `${minutes}:${secs < 10 ? '0' : ''}${secs}`;
+        }
+
+        function interpolateColor(value, maxValue, color1, color2) {
+            const ratio = Math.min(value / maxValue, 1);
+            const r = Math.round(color1[0] + ratio * (color2[0] - color1[0]));
+            const g = Math.round(color1[1] + ratio * (color2[1] - color1[1]));
+            const b = Math.round(color1[2] + ratio * (color2[2] - color1[2]));
+            return `rgba(${r}, ${g}, ${b}, 0.5)`;
+        }
+
+        function visualize() {
+            const bufferLength = analyser.frequencyBinCount;
+            const dataArray = new Uint8Array(bufferLength);
+
+            function draw() {
+                requestAnimationFrame(draw);
+                analyser.getByteFrequencyData(dataArray);
+                ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+                const radius = 2;
+                const spacing = canvas.width / numBalls;
+                const points = [];
+
+                for (let i = 0; i < numBalls; i++) {
+                    const index = Math.floor(i * (bufferLength / numBalls));
+                    const value = dataArray[index];
+                    const height = (value / 255) * deviceVolume * falseVolume * (canvas.height - 20);
+                    const x = (i + 1) * spacing;
+                    const y = canvas.height - height;
+                    points.push({ x, y, value });
+                }
+
+                for (let i = 0; i < points.length; i++) {
+                    const point = points[i];
+                    let ballColor = 'rgba(255, 255, 255, 0.5)';
+                    if (point.value > 180) {
+                        ballColor = 'rgba(255, 0, 0, 0.5)';
+                    } else if (point.value > 100) {
+                        ballColor = 'rgba(0, 0, 255, 0.5)';
+                    }
+
+                    ctx.beginPath();
+                    ctx.arc(point.x, point.y, radius, 0, Math.PI * 2);
+                    ctx.fillStyle = ballColor;
+                    ctx.fill();
+                    ctx.closePath();
+
+                    if (i < points.length - 1) {
+                        const nextPoint = points[i + 1];
+                        let lineColor;
+                        if (point.value > 180) {
+                            lineColor = interpolateColor(point.value, 255, [255, 0, 0], [255, 255, 255]);
+                        } else if (point.value > 100) {
+                            lineColor = interpolateColor(point.value, 255, [0, 0, 255], [255, 255, 255]);
+                        } else {
+                            lineColor = 'rgba(255, 255, 255, 0.8)';
+                        }
+
+                        ctx.strokeStyle = lineColor;
+                        ctx.lineWidth = 1;
+                        ctx.beginPath();
+                        ctx.moveTo(point.x, point.y);
+                        ctx.lineTo(nextPoint.x, nextPoint.y);
+                        ctx.stroke();
+                    }
+                }
+            }
+            draw();
+        }
+    </script>
+</body>
+</html>
