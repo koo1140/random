@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Neural Network Builder</title>
+    <style>
+        /* Global Styles */
+        * { box-sizing: border-box; font-family: 'Comic Sans MS', sans-serif; margin: 0; padding: 0; }
+        body { background: #1a1a1a; color: #e0e0e0; font-size: 18px; overflow-x: hidden; overflow-y: auto; }
+        h1 { font-size: 2em; color: #00ffcc; text-align: center; margin: 20px; }
+        button, input, select { font-family: inherit; font-size: 18px; padding: 10px; border-radius: 8px; border: none; margin: 5px; }
+        button { background: #00ffcc; color: #1a1a1a; cursor: pointer; transition: all 0.3s; }
+        button:hover { background: #00cc99; }
+        select, input[type="number"] { background: #333; color: #e0e0e0; }
+
+        /* Layout */
+        #builder { max-width: 800px; margin: auto; padding: 20px; }
+        #layers { display: flex; flex-direction: column; gap: 10px; margin-top: 10px; }
+        .layer-card { background: #333; padding: 20px; border-radius: 12px; display: flex; justify-content: space-between; align-items: center; opacity: 0; animation: fadeIn 0.5s forwards; cursor: grab; }
+        .layer-card:hover { box-shadow: 0px 0px 8px 2px #00ffcc; }
+        .layer-card:active { cursor: grabbing; }
+
+        /* Popups */
+        .popup, .overlay { display: none; position: fixed; z-index: 100; top: 0; left: 0; width: 100%; height: 100%; }
+        .overlay { background: rgba(0, 0, 0, 0.8); }
+        .popup { 
+            background: #262626; 
+            padding: 20px; 
+            border-radius: 12px; 
+            max-width: 500px; 
+            width: 80%; /* Responsive width */
+            max-height: 400px; /* Maximum height */
+            overflow-y: auto; /* Scroll if content exceeds */
+            margin: auto; 
+            top: 50%; 
+            transform: translate(-50%, -50%); 
+            opacity: 0; 
+            animation: fadeIn 0.5s forwards; 
+            left: 50%; /* Center horizontally */
+        }
+        .popup h3 { color: #00cc99; margin-bottom: 10px; }
+
+        /* Export and Import Box */
+        #exportContainer, #importContainer { margin-top: 20px; background: #222; padding: 15px; border-radius: 8px; }
+        #exportContainer textarea, #importContainer textarea { width: 100%; height: 150px; font-size: 16px; background: #333; color: #e0e0e0; border: none; padding: 10px; border-radius: 8px; }
+        #copyBtn { background: #00cc99; }
+
+        /* Animations */
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes fadeOut { from { opacity: 1; } to { opacity: 0; } }
+
+        /* Dark Scrollbars */
+        ::-webkit-scrollbar { width: 10px; }
+        ::-webkit-scrollbar-track { background: #333; }
+        ::-webkit-scrollbar-thumb { background: #00cc99; border-radius: 5px; }
+        ::-webkit-scrollbar-thumb:hover { background: #00ffcc; }
+    </style>
+</head>
+<body>
+
+<h1>Neural Network Architecture Builder</h1>
+<div id="builder">
+    <!-- Layers Container -->
+    <div id="layers"></div>
+    <button id="addLayerBtn">+ Add Layer</button>
+    <button id="exportBtn">Export</button>
+    <button id="importBtn">Import</button>
+</div>
+
+<!-- Export Container -->
+<div id="exportContainer" style="display: none;">
+    <button id="copyBtn">Copy to Clipboard</button>
+    <textarea id="exportText" readonly></textarea>
+</div>
+
+<!-- Import Container -->
+<div id="importContainer" style="display: none;">
+    <h3>Paste Your Neural Network Code Here:</h3>
+    <textarea id="importText"></textarea>
+    <button id="importConfirmBtn">Import</button>
+    <button onclick="closeImport()">Cancel</button>
+</div>
+
+<!-- Layer Popup -->
+<div class="overlay" id="layerOverlay"></div>
+<div class="popup" id="layerPopup">
+    <h3 id="layerPopupTitle">Configure Layer</h3>
+    <label>Layer Type:
+        <select id="layerType"></select>
+    </label>
+    <label>Number of Neurons: <input type="number" id="neurons" min="1" value="10" style="width: 70px;"></label>
+    <label>Activation Function:
+        <select id="activation"></select>
+    </label>
+    <button id="saveLayerBtn">Save Layer</button>
+    <button onclick="closeLayerPopup()">Cancel</button>
+</div>
+
+<!-- Info Popup -->
+<div class="overlay" id="infoOverlay"></div>
+<div class="popup" id="infoPopup">
+    <h3>Layer Information</h3>
+    <p id="infoText">Info content goes here...</p>
+    <button onclick="closeInfoPopup()">Close</button>
+</div>
+
+<script>
+    // Layer Types and Activation Functions
+    const layerData = [
+    {
+        "name": "Input Layer",
+        "description": "The Input Layer is where we first feed the raw data into the neural network, like images or text. It’s simply the starting point where information enters, ready to be processed.\n\nTransferred to the next layer: No math is done here.\n\nWhen you should use this: Always use an Input Layer to introduce your data."
+    },
+    {
+        "name": "Dense (Fully Connected) Layer",
+        "description": "A Dense Layer connects every neuron from the previous layer to every neuron in this layer, making sure that all the information is shared. It’s like a big family dinner where everyone talks to everyone!\n\nTransferred to the next layer: Output is a scalar or vector.\n\nMathematically, it can be represented as: \nY = WX + B, \nWhere Y is the output, W is the weight matrix, X is the input, and B is the bias.\n\nWhen you should use this: Use Dense Layers for general tasks like classification after feature extraction."
+    },
+    {
+        "name": "Convolutional Layer",
+        "description": "A Convolutional Layer is special for working with images. It looks for patterns like edges and shapes using filters, almost like looking through a magnifying glass to find details in a picture!\n\nTransferred to the next layer: Output is a 3D tensor (width, height, filters).\n\nMathematically, it can be represented as: \nOutput(i, j) = ∑∑(Input(m, n) * Filter(p, q))\n\nWhen you should use this: Use Convolutional Layers for image or spatial data to recognize patterns."
+    },
+    {
+        "name": "Pooling Layer",
+        "description": "A Pooling Layer helps to reduce the size of the data by downsampling, keeping only the important information. It’s like filtering out the noise so that we can focus on what really matters!\n\nTransferred to the next layer: Output is a downsampled 3D tensor (width, height, channels).\n\nMax Pooling selects the largest number:\nOutput = max(Input Region)\n\nWhen you should use this: Use Pooling Layers after Convolutional Layers to simplify the data."
+    },
+    {
+        "name": "Recurrent Layer (e.g., LSTM, GRU)",
+        "description": "Recurrent Layers are designed to handle sequences of data, like sentences or time series. They remember information from previous steps, making them great for tasks where context matters!\n\nTransferred to the next layer: Output is a sequence of output vectors.\n\nWhen you should use this: Use Recurrent Layers for tasks like language processing or time series prediction."
+    },
+    {
+        "name": "Dropout Layer",
+        "description": "A Dropout Layer randomly turns off some neurons during training. This helps prevent the model from becoming too dependent on specific neurons and makes it better at generalizing!\n\nTransferred to the next layer: Output is modified but retains the same shape.\n\nWhen you should use this: Use Dropout Layers to reduce overfitting in your model."
+    },
+    {
+        "name": "Batch Normalization Layer",
+        "description": "A Batch Normalization Layer normalizes the output from the previous layer to keep the data in a consistent range. This helps the model learn faster and more reliably!\n\nTransferred to the next layer: Output is normalized data.\n\nWhen you should use this: Use Batch Normalization after layers to stabilize and speed up training."
+    },
+    {
+        "name": "Output Layer",
+        "description": "The Output Layer gives the final predictions of the neural network. It summarizes all the learned information into a format we can use, like class labels or probabilities!\n\nTransferred to the next layer: Output is a scalar or vector (predictions).\n\nWhen you should use this: Always use an Output Layer to make predictions based on the last hidden layer."
+    },
+    {
+        "name": "Flatten Layer",
+        "description": "A Flatten Layer transforms multi-dimensional data (like images) into a one-dimensional vector. It’s like rolling up a rug into a straight line!\n\nTransferred to the next layer: Output is a 1D vector.\n\nWhen you should use this: Use Flatten Layers before Dense Layers when dealing with image data."
+    },
+    {
+        "name": "Activation Layer",
+        "description": "An Activation Layer applies an activation function to the output from the previous layer, introducing non-linearity to help the model learn complex patterns.\n\nTransferred to the next layer: Output after applying activation.\n\nCommon functions: ReLU, Sigmoid, Tanh, Softmax, etc.\n\nWhen you should use this: Use Activation Layers in between other layers to help the network learn better."
+    },
+    {
+        "name": "Residual (Skip Connection) Layer",
+        "description": "A Residual Layer adds the output from the previous layer directly to the output of the current layer, allowing the network to learn more efficiently. It’s like a shortcut to make learning faster!\n\nTransferred to the next layer: Output is from the current layer (with no activation).\n\nWhen you should use this: Use Residual Layers in very deep networks to help with training."
+    },
+    {
+        "name": "Attention Layer",
+        "description": "An Attention Layer helps the model focus on the most important parts of the input sequence, assigning different weights to different parts, like shining a spotlight on key details!\n\nTransferred to the next layer: Contextualized output (weighted sum).\n\nWhen you should use this: Use Attention Layers in sequence processing tasks like translation or text summarization."
+    },
+    {
+        "name": "Bidirectional Layer",
+        "description": "A Bidirectional Layer processes the input data in both forward and backward directions. This way, the model can learn from past and future context, enhancing its understanding!\n\nTransferred to the next layer: Combined output from both directions.\n\nWhen you should use this: Use Bidirectional Layers in tasks like language modeling or when the context of both ends matters."
+    },
+    {
+        "name": "ConvTranspose Layer (Deconvolution)",
+        "description": "A ConvTranspose Layer is used to upsample the data, making smaller images bigger. It’s like taking a small picture and enlarging it without losing too much detail!\n\nTransferred to the next layer: Output is a 3D tensor (upsampled).\n\nWhen you should use this: Use ConvTranspose Layers in tasks like image generation."
+    },
+    {
+        "name": "Embedding Layer",
+        "description": "An Embedding Layer converts integer-encoded input (like words) into dense vector representations. It’s like translating words into a form the model can understand better!\n\nTransferred to the next layer: Output is a dense vector representation.\n\nWhen you should use this: Use Embedding Layers for processing categorical data, especially in NLP tasks."
+    },
+    {
+        "name": "Spatial Dropout Layer",
+        "description": "A Spatial Dropout Layer is similar to Dropout, but it works with 3D data like images. It randomly drops entire feature maps to encourage robustness!\n\nTransferred to the next layer: Output is modified but retains the same shape.\n\nWhen you should use this: Use Spatial Dropout Layers for convolutional neural networks to reduce overfitting."
+    },
+    {
+        "name": "Locally Connected Layer",
+        "description": "A Locally Connected Layer applies filters to local regions of the input, similar to convolution but without shared weights. It’s like examining small sections of a picture separately!\n\nTransferred to the next layer: Output is a 3D tensor (width, height, filters).\n\nWhen you should use this: Use Locally Connected Layers when local patterns are more important than global patterns."
+    },
+    {
+        "name": "TimeDistributed Layer",
+        "description": "A TimeDistributed Layer applies a layer (like Dense or Conv) to each time step of a sequence independently. It’s like giving every piece of a puzzle the same treatment!\n\nTransferred to the next layer: Output is a 3D tensor (applied layer on each time step).\n\nWhen you should use this: Use TimeDistributed Layers when working with sequences of data where each time step needs the same processing."
+    }
+];
+
+const activationData = [
+    {
+        "name": "ReLU",
+        "description": "ReLU (Rectified Linear Unit) is an activation function that changes negative numbers to zero while keeping positive numbers the same. It’s like a switch that only lets positive numbers pass!\n\nMathematically, it’s defined as: \nReLU(x) = max(0, x)\n\nWhen you should use this: Use ReLU for most layers in the hidden parts of the network because it helps the network learn quickly."
+    },
+    {
+        "name": "Sigmoid",
+        "description": "Sigmoid is an activation function that compresses numbers between 0 and 1, making it useful for binary classification. It’s like a balloon that can only inflate to a certain limit!\n\nMathematically, it’s defined as: \nSigmoid(x) = 1 / (1 + e^(-x))\n\nWhen you should use this: Use Sigmoid when predicting probabilities, especially in binary classification tasks."
+    },
+    {
+        "name": "Softmax",
+        "description": "Softmax transforms a list of numbers into probabilities that add up to 1. It’s like giving each choice a chance based on its score!\n\nMathematically, it’s defined as: \nSoftmax(x_i) = e^(x_i) / ∑(e^(x_j)) for all j\n\nWhen you should use this: Use Softmax in the output layer for multi-class classification to get probabilities for each class."
+    },
+    {
+        "name": "Tanh",
+        "description": "Tanh (Hyperbolic Tangent) is an activation function that scales numbers between -1 and 1. It’s like a seesaw that can tilt both ways!\n\nMathematically, it’s defined as: \nTanh(x) = (e^x - e^(-x)) / (e^x + e^(-x))\n\nWhen you should use this: Use Tanh when you need outputs between -1 and 1, often in hidden layers."
+    },
+    {
+        "name": "Leaky ReLU",
+        "description": "Leaky ReLU is similar to ReLU but allows a small, non-zero gradient when the input is negative. It’s like a tiny leak that lets some water flow through even when the main path is blocked!\n\nMathematically, it’s defined as: \nLeaky ReLU(x) = x if x > 0 else αx, where α is a small constant (e.g., 0.01).\n\nWhen you should use this: Use Leaky ReLU to avoid dead neurons in your network."
+    },
+    {
+        "name": "None",
+        "description": "None, usually for input layer."
+    }
+];
+
+    let layers = [];
+    let editIndex = null;
+
+    document.getElementById('addLayerBtn').onclick = () => openLayerPopup();
+    document.getElementById('saveLayerBtn').onclick = () => saveLayer();
+    document.getElementById('exportBtn').onclick = () => exportAsMarkdown();
+    document.getElementById('copyBtn').onclick = () => copyToClipboard();
+    document.getElementById('importBtn').onclick = () => openImport();
+    document.getElementById('importConfirmBtn').onclick = () => importLayers();
+
+    // Populate layer types and activation functions only once
+    function populateSelectOptions() {
+        const layerTypeSelect = document.getElementById('layerType');
+        const activationSelect = document.getElementById('activation');
+
+        // Clear existing options to avoid duplicates
+        layerTypeSelect.innerHTML = '';
+        activationSelect.innerHTML = '';
+
+        layerData.forEach(type => {
+            const option = document.createElement('option');
+            option.value = type.name;
+            option.textContent = type.name;
+            layerTypeSelect.appendChild(option);
+        });
+
+        activationData.forEach(func => {
+            const option = document.createElement('option');
+            option.value = func.name;
+            option.textContent = func.name;
+            activationSelect.appendChild(option);
+        });
+    }
+
+    function openLayerPopup(index = null) {
+        editIndex = index;
+        if (index !== null) {
+            const layer = layers[index];
+            document.getElementById('layerPopupTitle').textContent = 'Edit Layer';
+            document.getElementById('layerType').value = layer.type;
+            document.getElementById('neurons').value = layer.neurons;
+            document.getElementById('activation').value = layer.activation;
+        } else {
+            document.getElementById('layerPopupTitle').textContent = 'Add Layer';
+            document.getElementById('layerType').value = layerData[0].name; // Default to first type
+            document.getElementById('neurons').value = 10; // Default neuron count
+            document.getElementById('activation').value = activationData[0].name; // Default to first function
+        }
+        document.getElementById('layerOverlay').style.display = 'block';
+        document.getElementById('layerPopup').style.display = 'block';
+    }
+
+    function closeLayerPopup() {
+        document.getElementById('layerOverlay').style.display = 'none';
+        document.getElementById('layerPopup').style.display = 'none';
+        document.getElementById('layerPopup').style.opacity = 0; // Reset opacity
+    }
+
+    function saveLayer() {
+        const layerType = document.getElementById('layerType').value;
+        const neurons = parseInt(document.getElementById('neurons').value);
+        const activation = document.getElementById('activation').value;
+
+        if (editIndex !== null) {
+            layers[editIndex] = { type: layerType, neurons: neurons, activation: activation };
+        } else {
+            layers.push({ type: layerType, neurons: neurons, activation: activation });
+        }
+
+        closeLayerPopup();
+        renderLayers();
+    }
+
+    function renderLayers() {
+        const layersDiv = document.getElementById('layers');
+        layersDiv.innerHTML = '';
+        layers.forEach((layer, index) => {
+            const layerDiv = document.createElement('div');
+            layerDiv.className = 'layer-card';
+            layerDiv.setAttribute('draggable', 'true'); // Enable drag and drop
+            layerDiv.setAttribute('data-index', index); // Store the index for reordering
+            layerDiv.innerHTML = `
+                <div>
+                    <strong>${layer.type}:</strong> ${layer.neurons} Neurons, Activation: ${layer.activation}
+                </div>
+                <div>
+                    <button onclick="openLayerPopup(${index})">Edit</button>
+                    <button onclick="removeLayer(${index})">Remove</button>
+                    <button onclick="showInfo(${index})">Info</button>
+                </div>
+            `;
+            layerDiv.addEventListener('dragstart', handleDragStart);
+            layerDiv.addEventListener('dragover', handleDragOver);
+            layerDiv.addEventListener('drop', handleDrop);
+            layersDiv.appendChild(layerDiv);
+            setTimeout(() => { layerDiv.style.opacity = 1; }, 50);
+        });
+    }
+
+    function handleDragStart(event) {
+        event.dataTransfer.setData('text/plain', event.target.dataset.index); // Set the index of the layer being dragged
+    }
+
+    function handleDragOver(event) {
+        event.preventDefault(); // Prevent default to allow drop
+    }
+
+    function handleDrop(event) {
+        event.preventDefault();
+        const draggedIndex = event.dataTransfer.getData('text/plain');
+        const targetIndex = event.target.dataset.index;
+
+        // Swap layers
+        if (draggedIndex !== targetIndex) {
+            const draggedLayer = layers[draggedIndex];
+            layers.splice(draggedIndex, 1);
+            layers.splice(targetIndex, 0, draggedLayer);
+            renderLayers();
+        }
+    }
+
+    function removeLayer(index) {
+        layers.splice(index, 1);
+        renderLayers();
+    }
+
+    function showInfo(index) {
+        const layer = layers[index];
+        const layerInfo = layerData.find(l => l.name === layer.type);
+        const activationInfo = activationData.find(a => a.name === layer.activation);
+
+        let infoText = `<strong>${layer.type}:</strong> ${layerInfo.description}<br><strong>${layer.activation}:</strong> ${activationInfo.description}`;
+        document.getElementById('infoText').innerHTML = infoText;
+        document.getElementById('infoOverlay').style.display = 'block';
+        document.getElementById('infoPopup').style.display = 'block';
+    }
+
+    function closeInfoPopup() {
+        document.getElementById('infoOverlay').style.display = 'none';
+        document.getElementById('infoPopup').style.display = 'none';
+        document.getElementById('infoPopup').style.opacity = 0; // Reset opacity
+    }
+
+    function exportAsMarkdown() {
+        const exportText = '__Neuronal Network Architecture Layers__:\n' +
+            layers.map(layer => `* ${layer.neurons} neurons of ${layer.type}, activates with the function ${layer.activation}`).join('\n');
+        document.getElementById('exportText').value = exportText;
+        document.getElementById('exportContainer').style.display = 'block';
+    }
+
+    function copyToClipboard() {
+        const exportText = document.getElementById('exportText');
+        exportText.select();
+        document.execCommand('copy');
+        alert('Copied to clipboard!');
+    }
+
+    // Open import input area
+    function openImport() {
+        document.getElementById('importContainer').style.display = 'block';
+    }
+
+    // Close import input area
+    function closeImport() {
+        document.getElementById('importContainer').style.display = 'none';
+        document.getElementById('importText').value = ''; // Clear input
+    }
+
+    // Import layers from pasted code
+    function importLayers() {
+        const inputText = document.getElementById('importText').value;
+        const regex = /(\d+)\s+neurons\s+of\s+([\w\s\(\)]+),\s+activates\s+with\s+the\s+function\s+([\w]+)/g; // Updated regex pattern
+        let match;
+
+        layers = []; // Reset layers
+
+        while ((match = regex.exec(inputText)) !== null) {
+            const neurons = parseInt(match[1]);
+            const type = match[2].trim(); // Get layer type, trim spaces
+            const activation = match[3].trim(); // Get activation function, trim spaces
+            layers.push({ type, neurons, activation });
+        }
+
+        closeImport();
+        renderLayers();
+    }
+
+    // Initialize
+    populateSelectOptions();
+</script>
+
+</body>
+</html>
