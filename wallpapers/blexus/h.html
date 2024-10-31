@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Smooth Glow Background</title>
+    <style>
+        /* Fullscreen setup */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        html, body { width: 100%; height: 100%; overflow: hidden; }
+        #webgl-container { position: fixed; top: 0; left: 0; width: 100%; height: 100%; }
+        #mode-toggle { position: absolute; top: 20px; right: 20px; font-size: 24px; cursor: pointer; }
+
+        /* Title styling */
+        #title-container {
+            position: absolute;
+            top: 15%; /* Adjusted position */
+            left: 50%;
+            transform: translateX(-50%);
+            font-size: 80px;
+            color: #ffffff;
+            font-family: Arial, sans-serif;
+            text-shadow: 0px 4px 8px rgba(0, 0, 0, 0.3);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 5; /* Ensure title is on top */
+        }
+
+        #title-container img {
+            width: 10wv; /* Adjust size as needed */
+            height: auto;
+            opacity: 0.05; /* Transparency level */
+            position: absolute;
+            z-index: -1; /* Place it behind the text */
+        }
+
+        #title-container span {
+            display: inline-block;
+        }
+
+        span {
+            font-size: 6rem;
+            margin-bottom: 10px;
+            font-weight: bold;
+            background: linear-gradient(90deg, #00C9A7, #FFD700, #FF61A6, #00C9A7); /* Teal, gold, and pink for a lively gradient */
+            background-size: 200% 200%;
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            text-shadow: 0 0 10px rgba(255, 255, 255, 0.1);
+            animation: colorShift 3s linear infinite;
+        }
+
+        @keyframes colorShift {
+            0% { background-position: 0% 50%; }
+            100% { background-position: 200% 50%; }
+        }
+
+        #title-container {
+            user-select: none; /* Prevents text selection */
+        }
+
+        #mode-toggle {
+            user-select: none; /* Prevents text selection */
+            pointer-events: auto; /* Allows click events */
+        }
+
+        /* Body container */
+        .body-container {
+            display: flex;
+            justify-content: center; /* Center containers */
+            align-items: center; /* Center vertically */
+            width: 100%; /* Full width */
+            position: absolute; /* Position absolute to layer correctly */
+            top: 60%; /* Adjust to avoid overlap with title */
+            z-index: 4; /* Ensure it is above background but below title */
+        }
+
+        .container {
+            max-width: 250px;
+            flex: 1; /* Allow containers to grow/shrink */
+            display: flex;
+            flex-direction: column; /* Stack text and emoji */
+            align-items: center; /* Center align items */
+            background-color: rgba(255, 255, 255, 0.1); /* Set transparent background */
+            height: 200px; /* Fixed height for visibility */
+            margin: 0 10px; /* Margin between containers */
+            border-radius: 10px; /* Optional: rounded corners */
+            opacity: 1; /* Full opacity for containers */
+            position: relative; /* Stacking context for absolute positioning */
+    display: flex; /* Flexbox to center items */
+    flex-direction: column; /* Stack text and emoji vertically */
+    align-items: center; /* Center items horizontally */
+    justify-content: center; /* Center items vertically */
+            pointer-events: auto; /* Allow interactions */
+            z-index: 2; /* Ensure containers are above the background */
+        }
+.text {
+    user-select: none; /* Prevents text selection */
+    color: #ffffff; /* Text color */
+    z-index: 5; /* Ensure text is above the emoji */
+    opacity: 1;
+    text-align: center; /* Center text horizontally */
+    position: absolute; /* Position absolutely */
+    top: 50%; /* Center vertically */
+    left: 50%; /* Center horizontally */
+    transform: translate(-50%, -50%); /* Adjust for centering */
+    font-family: 'Comic Sans MS', cursive, sans-serif; /* Change font to Comic Sans MS */
+}
+
+
+.emoji {
+    font-size: 7rem; /* Size of the emoji */
+    opacity: 0.2; /* Opacity for emoji */
+    user-select: none; /* Prevents emoji selection */
+    z-index: 4; /* Keep emoji below the text */
+    position: absolute; /* Position absolutely */
+    bottom: 10px; /* Position emoji towards the bottom of the container */
+    left: 50%; /* Center horizontally */
+    transform: translate(-50%, -20%); /* Adjust for centering */
+}
+
+    </style>
+</head>
+<body>
+    <div id="webgl-container"></div>
+    <div id="mode-toggle">☀️</div>
+
+    <!-- Title container -->
+    <div id="title-container">
+        <span>Xeton</span>
+        <img src='https://github.com/koo1140/random/blob/main/brain.png?raw=true' />
+    </div>
+
+    <div class="body-container">
+    <div class="container">
+        <div class="text">Fast</div>
+        <div class="emoji">⚡️</div> <!-- Lightning bolt for speed -->
+    </div>
+    <div class="container">
+        <div class="text">Effortless</div>
+        <div class="emoji">✨</div> <!-- Sparkles for something easy and magical -->
+    </div>
+    <div class="container">
+        <div class="text">Adaptable</div>
+        <div class="emoji">🌿</div> <!-- Leaf for adaptability and growth -->
+    </div>
+</div>
+
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script>
+        let scene, camera, renderer, material, plane;
+        let mouseX = 0, mouseY = 0;
+        let targetMouseX = 0, targetMouseY = 0;
+        const lerpFactor = 0.1;
+        let isDarkMode = true; // Start in dark mode
+        let currentColor1 = new THREE.Vector3(0, 0, 0); // Black
+        let currentColor2 = new THREE.Vector3(0.2, 0.4, 0.8); // Initial dark mode color
+        let targetColor1 = new THREE.Vector3(0, 0, 0);
+        let targetColor2 = new THREE.Vector3(0.2, 0.4, 0.8);
+
+        function init() {
+            scene = new THREE.Scene();
+            camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 10);
+            camera.position.z = 1;
+
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            document.getElementById('webgl-container').appendChild(renderer.domElement);
+
+            const geometry = new THREE.PlaneGeometry(2, 2);
+            const fragmentShader = `
+                uniform float time;
+                uniform vec2 resolution;
+                uniform vec2 mouse;
+                uniform vec3 color1;
+                uniform vec3 color2;
+
+                #define FLOW_INTENSITY 0.05
+
+                void main() {
+                    vec2 uv = gl_FragCoord.xy / resolution.xy;
+                    vec2 p = (uv * 2.0 - 1.0);
+                    vec2 m = (mouse / resolution.xy) * 2.0 - 1.0;
+                    
+                    vec2 flowVector = m - p;
+                    float dist = length(flowVector);
+                    
+                    vec2 offset = flowVector * FLOW_INTENSITY / (dist + 0.5);
+                    p += offset;
+
+                    for(int i = 1; i < 7; i++) {
+                        float fi = float(i);
+                        p.x += 0.1 / fi * sin(fi * 2.0 * p.y + time * 0.25 + 0.2 * fi);
+                        p.y += 0.1 / fi * cos(fi * 2.0 * p.x + time * 0.25 + 0.2 * fi);
+                    }
+                    
+                    float intensity = 0.5 * sin(3.0 * p.x + 2.0 * p.y) + 0.5;
+                    vec3 color = mix(color1, color2, intensity);
+                    
+                    gl_FragColor = vec4(color, 1.0);
+                }
+            `;
+
+            material = new THREE.ShaderMaterial({
+                uniforms: {
+                    time: { value: 1.0 },
+                    resolution: { value: new THREE.Vector2() },
+                    mouse: { value: new THREE.Vector2() },
+                    color1: { value: currentColor1 },
+                    color2: { value: currentColor2 }
+                },
+                fragmentShader: fragmentShader
+            });
+
+            plane = new THREE.Mesh(geometry, material);
+            scene.add(plane);
+
+            window.addEventListener('resize', onWindowResize, false);
+            document.addEventListener('mousemove', onMouseMove, false);
+            document.addEventListener('click', changeColorsOnClick, false);
+
+            onWindowResize();
+            startAutoColorChange();
+            animate();
+        }
+
+        function onWindowResize() {
+            const width = window.innerWidth;
+            const height = window.innerHeight;
+
+            camera.aspect = width / height;
+            camera.updateProjectionMatrix();
+
+            renderer.setSize(width, height);
+            material.uniforms.resolution.value.x = width;
+            material.uniforms.resolution.value.y = height;
+        }
+
+        function onMouseMove(event) {
+            targetMouseX = event.clientX;
+            targetMouseY = event.clientY;
+        }
+
+        function lerp(start, end, t) {
+            return start * (1 - t) + end * t;
+        }
+
+        function lerpVector(start, end, t) {
+            return new THREE.Vector3(
+                lerp(start.x, end.x, t),
+                lerp(start.y, end.y, t),
+                lerp(start.z, end.z, t)
+            );
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+
+            mouseX = lerp(mouseX, targetMouseX, lerpFactor);
+            mouseY = lerp(mouseY, targetMouseY, lerpFactor);
+
+            currentColor1 = lerpVector(currentColor1, targetColor1, 0.05);
+            currentColor2 = lerpVector(currentColor2, targetColor2, 0.05);
+
+            material.uniforms.time.value += 0.025;
+            material.uniforms.mouse.value.x = mouseX;
+            material.uniforms.mouse.value.y = window.innerHeight - mouseY;
+            material.uniforms.color1.value = currentColor1;
+            material.uniforms.color2.value = currentColor2;
+
+            renderer.render(scene, camera);
+        }
+
+        function startAutoColorChange() {
+            setInterval(changeColors, 45000); // Change colors every 45 seconds
+        }
+
+        function changeColors() {
+            if (isDarkMode) {
+                targetColor1 = new THREE.Vector3(0, 0, 0); // Always black in dark mode
+                targetColor2 = new THREE.Vector3(Math.random(), Math.random(), Math.random());
+            } else {
+                targetColor1 = new THREE.Vector3(Math.random(), Math.random(), Math.random());
+                targetColor2 = new THREE.Vector3(Math.random(), Math.random(), Math.random());
+            }
+        }
+
+        function changeColorsOnClick(event) {
+            if (event.target.tagName.toLowerCase() !== 'a' && event.target.tagName.toLowerCase() !== 'button') {
+                event.preventDefault();
+                changeColors();
+            }
+        }
+
+        function toggleMode() {
+            isDarkMode = !isDarkMode;
+            document.body.classList.toggle('dark-mode', isDarkMode);
+            document.body.classList.toggle('light-mode', !isDarkMode);
+            
+            const modeToggle = document.getElementById('mode-toggle');
+            modeToggle.textContent = isDarkMode ? '☀️' : '🌑';
+
+            changeColors(); // Immediately change colors when toggling mode
+        }
+
+        // Event listeners
+        document.addEventListener('DOMContentLoaded', function() {
+            init();
+            
+            const modeToggle = document.getElementById('mode-toggle');
+            modeToggle.addEventListener('click', toggleMode);
+        });
+
+        // Function to be called from outside (e.g., from script.js)
+        function updateBackgroundMode(isLightMode) {
+            isDarkMode = !isLightMode;
+            changeColors();
+        }
+    </script>
+</body>
+</html>
