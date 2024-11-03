@@ -1,0 +1,390 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ToDoList</title>
+    <style>
+        /* Basic styles */
+        body {
+            margin: 0;
+            font-family: 'Arial', sans-serif;
+            background: linear-gradient(to right, #1f1f1f, #121212);
+            color: #e0e0e0;
+            display: flex;
+            height: 100vh;
+            overflow: hidden; /* Prevent scrolling */
+        }
+
+        /* Sidebar styles */
+        .sidebar {
+            width: 250px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 15px;
+            padding: 20px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+            overflow-y: auto;
+            transition: width 0.3s; /* Smooth transition on hover */
+        }
+
+        .sidebar:hover {
+            width: 300px; /* Expand sidebar on hover */
+        }
+
+        .sidebar h2 {
+            text-align: center;
+            margin: 0 0 20px 0;
+            color: #ffffff;
+        }
+
+        .todo-list {
+            margin-bottom: 20px;
+            cursor: pointer;
+            padding: 10px;
+            border-radius: 8px;
+            background: rgba(255, 255, 255, 0.05);
+            transition: background 0.3s;
+        }
+
+        .todo-list:hover {
+            background: rgba(255, 255, 255, 0.1);
+        }
+
+        .todo-list .remove-list {
+            color: red;
+            cursor: pointer;
+            margin-left: 10px;
+        }
+
+        /* Glass panel for main content */
+        .glass-panel {
+            flex-grow: 1;
+            margin: 20px;
+            padding: 20px;
+            background: rgba(30, 30, 30, 0.8);
+            border-radius: 15px;
+            backdrop-filter: blur(15px);
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+            display: flex;
+            flex-direction: column;
+            align-items: center; /* Center content */
+        }
+
+        h1 {
+            text-align: center;
+            margin-bottom: 20px;
+            color: #ffffff;
+        }
+
+        input[type="text"] {
+            width: 100%;
+            padding: 10px;
+            border-radius: 10px;
+            border: none;
+            background-color: #2e2e2e;
+            color: #ffffff;
+            margin-bottom: 10px;
+            transition: all 0.3s;
+        }
+
+        input[type="text"]:focus {
+            outline: none;
+            box-shadow: 0 0 10px rgba(255, 255, 255, 0.6);
+        }
+
+        .button {
+            width: 100%;
+            padding: 10px;
+            border-radius: 10px;
+            border: none;
+            background: rgba(255, 255, 255, 0.2);
+            color: #ffffff;
+            cursor: pointer;
+            margin-bottom: 10px;
+            transition: background 0.3s;
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.2);
+        }
+
+        .button:hover {
+            background: rgba(255, 255, 255, 0.3);
+        }
+
+        ul {
+            list-style-type: none;
+            padding: 0;
+            width: 100%;
+        }
+
+        li {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 10px;
+            padding: 10px;
+            margin-bottom: 10px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            transition: background 0.3s; /* Smooth hover effect */
+        }
+
+        li:hover {
+            background: rgba(255, 255, 255, 0.15); /* Hover effect */
+        }
+
+        .remove {
+            cursor: pointer;
+            color: red;
+            padding: 0 10px;
+        }
+
+        /* Task complete style */
+        .completed {
+            text-decoration: line-through;
+            color: #aaa; /* Gray color for completed tasks */
+        }
+
+        /* Modal styles */
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            overflow: auto;
+            background-color: rgba(0, 0, 0, 0.7);
+            padding-top: 60px;
+        }
+
+        .modal-content {
+            background-color: #1f1f1f;
+            margin: 5% auto;
+            padding: 20px;
+            border-radius: 15px;
+            width: 80%;
+            max-width: 400px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+        }
+
+        .close {
+            color: #aaa;
+            float: right;
+            font-size: 28px;
+            font-weight: bold;
+        }
+
+        .close:hover,
+        .close:focus {
+            color: white;
+            text-decoration: none;
+            cursor: pointer;
+        }
+
+        /* Responsive styles */
+        @media (max-width: 600px) {
+            h1 {
+                font-size: 20px;
+            }
+
+            .sidebar {
+                width: 100%;
+                padding: 10px;
+            }
+        }
+    </style>
+</head>
+<body>
+
+<div class="sidebar" id="sidebar">
+    <h2>ToDo Lists</h2>
+    <div id="todoLists"></div>
+    <button class="button" id="createListBtn">Create New List</button>
+</div>
+
+<div class="glass-panel">
+    <h1 id="currentListName">Current List</h1>
+    <input type="text" id="taskInput" placeholder="Add a new task...">
+    <button class="button" id="addTaskBtn">Add Task</button>
+    <ul id="taskList"></ul>
+</div>
+
+<!-- Modal for naming and editing ToDo Lists -->
+<div id="listModal" class="modal">
+    <div class="modal-content">
+        <span class="close" id="modalCloseBtn">&times;</span>
+        <h2 id="modalTitle" style="color: #ffffff;">Create ToDo List</h2>
+        <input type="text" id="listNameInput" placeholder="List Name" style="background-color: #2e2e2e; color: #ffffff;">
+        <button class="button" id="saveListBtn">Save List</button>
+    </div>
+</div>
+
+<script>
+    // Load tasks and lists from local storage
+    document.addEventListener('DOMContentLoaded', loadLists);
+
+    const taskInput = document.getElementById('taskInput');
+    const addTaskBtn = document.getElementById('addTaskBtn');
+    const taskList = document.getElementById('taskList');
+    const sidebar = document.getElementById('todoLists');
+    const createListBtn = document.getElementById('createListBtn');
+    const listModal = document.getElementById('listModal');
+    const modalCloseBtn = document.getElementById('modalCloseBtn');
+    const saveListBtn = document.getElementById('saveListBtn');
+    const listNameInput = document.getElementById('listNameInput');
+    const currentListName = document.getElementById('currentListName');
+
+    let currentList = null;
+
+    createListBtn.addEventListener('click', openModal);
+    modalCloseBtn.addEventListener('click', closeModal);
+    saveListBtn.addEventListener('click', saveList);
+    addTaskBtn.addEventListener('click', addTask);
+
+    function loadLists() {
+        const lists = JSON.parse(localStorage.getItem('todoLists')) || {};
+        sidebar.innerHTML = '';
+        for (const listName in lists) {
+            const listDiv = document.createElement('div');
+            listDiv.className = 'todo-list';
+            listDiv.innerHTML = `${listName} <span class="remove-list" onclick="removeList('${listName}')">❌</span>`;
+            listDiv.draggable = true;
+            listDiv.ondragstart = (e) => e.dataTransfer.setData('text/plain', listName);
+            listDiv.ondragover = (e) => e.preventDefault();
+            listDiv.ondrop = (e) => dropList(e, listName);
+            listDiv.onclick = () => loadTasks(listName);
+            sidebar.appendChild(listDiv);
+        }
+    }
+
+    function loadTasks(listName) {
+        const lists = JSON.parse(localStorage.getItem('todoLists')) || {};
+        currentList = listName;
+        currentListName.innerText = listName;
+        taskList.innerHTML = '';
+        lists[listName].forEach(task => {
+            addTaskToList(task);
+        });
+    }
+
+    function openModal() {
+        listNameInput.value = '';
+        listModal.style.display = 'block';
+        document.getElementById('modalTitle').innerText = 'Create ToDo List';
+    }
+
+    function closeModal() {
+        listModal.style.display = 'none';
+    }
+
+    function saveList() {
+        const listName = listNameInput.value.trim();
+        if (listName === '') return;
+        const lists = JSON.parse(localStorage.getItem('todoLists')) || {};
+        if (lists[listName]) {
+            alert('List with this name already exists!');
+            return;
+        }
+        lists[listName] = [];
+        localStorage.setItem('todoLists', JSON.stringify(lists));
+        closeModal();
+        loadLists();
+    }
+
+    function addTask() {
+        const taskValue = taskInput.value.trim();
+        if (!currentList || taskValue === '') return;
+
+        addTaskToList(taskValue);
+        saveTask(currentList, taskValue);
+        taskInput.value = '';
+    }
+
+    function addTaskToList(taskValue) {
+        const li = document.createElement('li');
+        li.textContent = taskValue;
+
+        // Checkbox for task completion
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.classList.add('task-checkbox');
+        checkbox.onclick = () => {
+            li.classList.toggle('completed');
+            toggleTaskCompletion(currentList, taskValue, checkbox.checked);
+        };
+
+        const removeBtn = document.createElement('span');
+        removeBtn.textContent = '❌';
+        removeBtn.classList.add('remove');
+        removeBtn.onclick = (e) => {
+            e.stopPropagation();
+            li.remove();
+            removeTask(currentList, taskValue);
+        };
+
+        li.appendChild(checkbox); // Add checkbox to list item
+        li.appendChild(removeBtn);
+        taskList.appendChild(li);
+    }
+
+    function toggleTaskCompletion(listName, task, completed) {
+        const lists = JSON.parse(localStorage.getItem('todoLists')) || {};
+        if (completed) {
+            // Mark as completed
+            lists[listName].forEach((t, index) => {
+                if (t === task) lists[listName][index] += ' (completed)'; // Example of task status
+            });
+        } else {
+            // Mark as incomplete
+            lists[listName].forEach((t, index) => {
+                if (t.includes(task)) lists[listName][index] = task; // Remove completion status
+            });
+        }
+        localStorage.setItem('todoLists', JSON.stringify(lists));
+    }
+
+    function saveTask(listName, task) {
+        const lists = JSON.parse(localStorage.getItem('todoLists')) || {};
+        lists[listName].push(task);
+        localStorage.setItem('todoLists', JSON.stringify(lists));
+    }
+
+    function removeTask(listName, task) {
+        const lists = JSON.parse(localStorage.getItem('todoLists')) || {};
+        lists[listName] = lists[listName].filter(t => t !== task);
+        localStorage.setItem('todoLists', JSON.stringify(lists));
+    }
+
+    function removeList(listName) {
+        const lists = JSON.parse(localStorage.getItem('todoLists')) || {};
+        delete lists[listName];
+        localStorage.setItem('todoLists', JSON.stringify(lists));
+        loadLists();
+        if (currentList === listName) {
+            currentListName.innerText = 'Current List';
+            taskList.innerHTML = '';
+            currentList = null;
+        }
+    }
+
+    function dropList(event, targetListName) {
+        event.preventDefault();
+        const draggedListName = event.dataTransfer.getData('text/plain');
+        const lists = JSON.parse(localStorage.getItem('todoLists')) || {};
+        const draggedListTasks = lists[draggedListName];
+
+        delete lists[draggedListName];
+        lists[targetListName].push(...draggedListTasks);
+        localStorage.setItem('todoLists', JSON.stringify(lists));
+        loadLists();
+    }
+
+    // Close modal when clicking outside of it
+    window.onclick = function(event) {
+        if (event.target === listModal) {
+            closeModal();
+        }
+    }
+</script>
+
+</body>
+</html>
