@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Responsive Neon Typewriter Effect</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background-color: #000;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            flex-direction: column;
+            height: 100vh;
+            overflow: hidden;
+            color: #fff;
+            font-family: 'Courier New', monospace;
+        }
+
+        .center-text {
+            font-size: 4vw; /* Responsive font size based on viewport width */
+            color: transparent;
+            background: linear-gradient(to right, red 10%, purple 50%, red 90%);
+            -webkit-background-clip: text;
+            background-clip: text;
+            font-family: 'Courier New', monospace;
+            animation: fadeIn 2s ease;
+            margin: 20px;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+    </style>
+</head>
+<body>
+    <div class="center-text typewriter-text">God is coming.</div>
+    <div class="center-text typewriter-text">Welcome to the real world</div>
+    <div class="center-text typewriter-text">Let the lights guide you</div>
+
+    <script>
+        const randomChars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*";
+        
+        function getRandomChar() {
+            return randomChars[Math.floor(Math.random() * randomChars.length)];
+        }
+
+        // Typewriter function to apply effect to a single element
+        function typeEffect(element, finalText, intervalTime = 50) {
+            const midIndex = Math.floor(finalText.length / 2);
+            let revealIndex = 0;
+
+            const fastInterval = setInterval(() => {
+                let displayText = "";
+                
+                // Left random characters
+                const leftPadding = Math.max(0, midIndex - revealIndex);
+                for (let i = 0; i < leftPadding; i++) {
+                    displayText += getRandomChar();
+                }
+
+                // Revealed characters
+                const startReveal = Math.max(0, midIndex - revealIndex);
+                const endReveal = Math.min(finalText.length - 1, midIndex + revealIndex);
+                for (let i = startReveal; i <= endReveal; i++) {
+                    displayText += finalText[i];
+                }
+
+                // Right random characters
+                const rightPaddingStart = endReveal + 1;
+                for (let i = rightPaddingStart; i < finalText.length; i++) {
+                    displayText += getRandomChar();
+                }
+
+                element.textContent = displayText;
+            }, intervalTime);
+
+            const revealInterval = setInterval(() => {
+                if (revealIndex < finalText.length) {
+                    revealIndex++;
+                } else {
+                    clearInterval(revealInterval);
+                    clearInterval(fastInterval);
+                    element.textContent = finalText;
+                }
+            }, 300); // Adjust reveal speed as needed
+        }
+
+        // Apply the typewriter effect to all elements with the class "typewriter-text"
+        function applyTypewriterEffectToAll() {
+            const elements = document.querySelectorAll('.typewriter-text');
+            elements.forEach((element, index) => {
+                const finalText = element.textContent;
+                element.textContent = ""; // Clear existing text
+                setTimeout(() => typeEffect(element, finalText), index * 1500); // Stagger start time for each
+            });
+        }
+
+        applyTypewriterEffectToAll();
+    </script>
+</body>
+</html>
+
