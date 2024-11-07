@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Responsive Neon Typewriter Effect</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background-color: #000;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            overflow: hidden;
+            color: #fff;
+            font-family: 'Courier New', monospace;
+        }
+
+        /* Scroll container for text elements */
+        .scroll-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            height: 80vh; /* Adjust height to control scroll area */
+            overflow-y: hidden; /* Hide overflow */
+            padding: 20px 0;
+            width: 100%;
+        }
+
+        .center-text {
+            font-size: 3vw;
+            color: transparent;
+            background: linear-gradient(to right, red 10%, purple 50%, red 90%);
+            -webkit-background-clip: text;
+            background-clip: text;
+            font-family: 'Courier New', monospace;
+            animation: fadeIn 2s ease;
+            margin: 10px 0;
+            white-space: nowrap;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+    </style>
+</head>
+<body>
+    <div class="scroll-container">
+        <div class="center-text typewriter-text">How are you, stranger?</div>
+<div class="center-text typewriter-text">We haven't talked in a long time</div>
+<div class="center-text typewriter-text">I tried to find you</div>
+<div class="center-text typewriter-text">But I couldn't reach you</div>
+<div class="center-text typewriter-text">You've stayed behind</div>
+<div class="center-text typewriter-text">Maybe I moved too fast</div>
+<div class="center-text typewriter-text">I hold you just as close</div>
+<div class="center-text typewriter-text">But I don't feel anything anymore</div>
+<div class="center-text typewriter-text">Where is the soul, where is the feeling?</div>
+<div class="center-text typewriter-text">Where are the good times when we felt alive?</div>
+<div class="center-text typewriter-text">Memories fade, love seems distant</div>
+<div class="center-text typewriter-text">And now all that's left is just emptiness</div>
+<div class="center-text typewriter-text">Our paths diverged, we've changed too much</div>
+<div class="center-text typewriter-text">All that's left now are faded snapshots</div>
+<div class="center-text typewriter-text">I see your face in the shadows of my mind</div>
+<div class="center-text typewriter-text">But I know those days are far behind</div>
+<div class="center-text typewriter-text">Maybe someday, somewhere down the line</div>
+<div class="center-text typewriter-text">We'll meet again, but you won't be mine</div>
+<div class="center-text typewriter-text">How are you, stranger? Do you remember me?</div>
+
+    </div>
+
+    <script>
+        const randomChars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*";
+        
+        function getRandomChar() {
+            return randomChars[Math.floor(Math.random() * randomChars.length)];
+        }
+
+        // Typewriter function to apply effect to a single element
+        function typeEffect(element, finalText, intervalTime = 50) {
+            const midIndex = Math.floor(finalText.length / 2);
+            let revealIndex = 0;
+
+            const fastInterval = setInterval(() => {
+                let displayText = "";
+                
+                const leftPadding = Math.max(0, midIndex - revealIndex);
+                for (let i = 0; i < leftPadding; i++) {
+                    displayText += getRandomChar();
+                }
+
+                const startReveal = Math.max(0, midIndex - revealIndex);
+                const endReveal = Math.min(finalText.length - 1, midIndex + revealIndex);
+                for (let i = startReveal; i <= endReveal; i++) {
+                    displayText += finalText[i];
+                }
+
+                const rightPaddingStart = endReveal + 1;
+                for (let i = rightPaddingStart; i < finalText.length; i++) {
+                    displayText += getRandomChar();
+                }
+
+                element.textContent = displayText;
+            }, intervalTime);
+
+            const revealInterval = setInterval(() => {
+                if (revealIndex < finalText.length) {
+                    revealIndex++;
+                } else {
+                    clearInterval(revealInterval);
+                    clearInterval(fastInterval);
+                    element.textContent = finalText;
+                }
+            }, 100); // Adjust reveal speed as needed
+        }
+
+        function applyTypewriterEffectToAll() {
+            const elements = document.querySelectorAll('.typewriter-text');
+            const scrollContainer = document.querySelector('.scroll-container');
+            
+            elements.forEach((element, index) => {
+                const finalText = element.textContent;
+                element.textContent = ""; // Clear existing text
+
+                setTimeout(() => {
+                    typeEffect(element, finalText);
+                    
+                    // Scroll container to show new element
+                    scrollContainer.scrollTo({
+                        top: scrollContainer.scrollHeight,
+                        behavior: 'smooth'
+                    });
+                }, index * 1200); // Stagger start time for each
+            });
+        }
+
+        applyTypewriterEffectToAll();
+    </script>
+</body>
+</html>
