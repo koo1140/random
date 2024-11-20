@@ -1,0 +1,250 @@
+<!DOCTYPE html> 
+<html lang="en"> 
+<head> 
+    <meta charset="UTF-8"> 
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"> 
+    <title>A Call to Worship and Obedience</title> 
+    <style> 
+        body { 
+            margin: 0; 
+            padding: 0; 
+            background-color: #000; 
+            font-family: 'Montserrat', sans-serif; 
+            overflow: hidden; 
+        } 
+        .title { 
+            font-size: 4vw; 
+            color: #fff; 
+            text-align: center; 
+            font-weight: bold; 
+            position: absolute; 
+            top: 20%; 
+            left: 50%; 
+            transform: translate(-50%, -50%); 
+            text-shadow: 0 0 2vw rgba(255, 255, 255, 0.5); 
+        } 
+        .scripture { 
+            font-size: 3vw; 
+            color: #fff; 
+            text-align: center; 
+            position: absolute; 
+            top: 60%; 
+            left: 50%; 
+            transform: translate(-50%, -50%); 
+            text-shadow: 0 0 2vw rgba(255, 255, 255, 0.5); 
+        } 
+        .scripture div { 
+            margin-bottom: 2vw; 
+        } 
+        .background { 
+            position: absolute; 
+            top: 0; 
+            left: 0; 
+            width: 100%; 
+            height: 100%; 
+            background: linear-gradient(45deg, #2f4f7f, #191970); 
+            animation: gradient 15s infinite; 
+        } 
+        @keyframes gradient { 
+            0% { 
+                background-position: 0% 50%; 
+            } 
+            50% { 
+                background-position: 100% 50%; 
+            } 
+            100% { 
+                background-position: 0% 50%; 
+            } 
+        } 
+        .circles { 
+            position: absolute; 
+            top: 50%; 
+            left: 50%; 
+            transform: translate(-50%, -50%); 
+        } 
+        .circle { 
+            position: absolute; 
+            width: 10vw; 
+            height: 10vw; 
+            border-radius: 50%; 
+            background-color: rgba(255, 255, 255, 0.5); 
+            box-shadow: 0 0 2vw rgba(255, 255, 255, 0.5); 
+            animation: pulse 3s infinite; 
+        } 
+        .squares { 
+            position: absolute; 
+            top: 50%; 
+            left: 50%; 
+            transform: translate(-50%, -50%); 
+        } 
+        .square { 
+            position: absolute; 
+            width: 5vw; 
+            height: 5vw; 
+            background-color: rgba(255, 255, 255, 0.5); 
+            box-shadow: 0 0 2vw rgba(255, 255, 255, 0.5); 
+            animation: shake 3s infinite; 
+            transform: rotate(45deg); 
+        } 
+        @keyframes pulse { 
+            0% { 
+                transform: scale(1); 
+            } 
+            50% { 
+                transform: scale(2); 
+            } 
+            100% { 
+                transform: scale(1); 
+            } 
+        } 
+        @keyframes shake { 
+            0% { 
+                transform: rotate(45deg) translateX(0); 
+            } 
+            50% { 
+                transform: rotate(45deg) translateX(2vw); 
+            } 
+            100% { 
+                transform: rotate(45deg) translateX(0); 
+            } 
+        } 
+        .circle:hover, .square:hover { 
+            transform: scale(2.5); 
+        } 
+    </style> 
+</head> 
+<body> 
+    <div class="background"></div> 
+    <div class="title">A Call to Worship and Obedience</div> 
+    <div class="scripture" id="scripture">Loading verse...</div> 
+
+    <div class="circles"> 
+        <div class="circle" style="top: -30vw; left: -30vw;"></div> 
+        <div class="circle" style="top: 30vw; left: -20vw;"></div> 
+        <div class="circle" style="top: 20vw; left: 30vw;"></div> 
+        <div class="circle" style="top: -20vw; left: 20vw;"></div> 
+    </div> 
+
+    <div class="squares"> 
+        <div class="square" style="top: -40vw; left: -40vw;"></div> 
+        <div class="square" style="top: 20vw; left: -30vw;"></div> 
+        <div class="square" style="top: 40vw; left: -20vw;"></div> 
+        <div class="square" style="top: 30vw; left: 20vw;"></div> 
+        <div class="square" style="top: 10vw; left: 40vw;"></div> 
+    </div> 
+
+    <script>
+
+async function fetchVerse() {
+    const bibleStructure = {
+    genesis: 50,
+    exodus: 40,
+    leviticus: 27,
+    numbers: 36,
+    deuteronomy: 34,
+    joshua: 24,
+    judges: 21,
+    ruth: 4,
+    "1+samuel": 31,
+    "2+samuel": 24,
+    "1+kings": 22,
+    "2+kings": 25,
+    "1+chronicles": 29,
+    "2+chronicles": 36,
+    ezra: 10,
+    nehemiah: 13,
+    esther: 10,
+    job: 42,
+    psalms: 150,
+    proverbs: 31,
+    ecclesiastes: 12,
+    "song+of+solomon": 8,
+    isaiah: 66,
+    jeremiah: 52,
+    lamentations: 5,
+    ezekiel: 48,
+    daniel: 12,
+    hosea: 14,
+    joel: 3,
+    amos: 9,
+    obadiah: 1,
+    jonah: 4,
+    micah: 7,
+    nahum: 3,
+    habakkuk: 3,
+    zephaniah: 3,
+    haggai: 2,
+    zechariah: 14,
+    malachi: 4,
+    matthew: 28,
+    mark: 16,
+    luke: 24,
+    john: 21,
+    acts: 28,
+    romans: 16,
+    "1+corinthians": 16,
+    "2+corinthians": 13,
+    galatians: 6,
+    ephesians: 6,
+    philippians: 4,
+    colossians: 4,
+    "1+thessalonians": 5,
+    "2+thessalonians": 3,
+    "1+timothy": 6,
+    "2+timothy": 4,
+    titus: 3,
+    philemon: 1,
+    hebrews: 13,
+    james: 5,
+    "1+peter": 5,
+    "2+peter": 3,
+    "1+john": 5,
+    "2+john": 1,
+    "3+john": 1,
+    jude: 1,
+    revelation: 22
+};
+
+
+    // Get all books
+    const books = Object.keys(bibleStructure);
+
+    // Randomly pick a book
+    const book = books[Math.floor(Math.random() * books.length)];
+
+    // Randomly pick a chapter within that book
+    const maxChapters = bibleStructure[book];
+    const chapter = Math.floor(Math.random() * maxChapters) + 1;
+
+    // Fetch a random verse count for the chapter
+    // You'd need real chapter-specific data here. For now, we'll assume max 40 verses..
+    const verse = Math.floor(Math.random() * 40) + 1;
+
+    // Construct API URL
+    const apiUrl = `https://bible-api.com/${book}+${chapter}:${verse}`;
+
+    try {
+        const response = await fetch(apiUrl);
+        if (!response.ok) throw new Error('Error fetching verse');
+
+        const data = await response.json();
+        const passage = data.text || 'Verse not found';
+
+        document.getElementById('scripture').innerHTML = `
+            <div>${passage}</div>
+            <div><strong>${data.reference}</strong></div>
+        `;
+    } catch (error) {
+        document.getElementById('scripture').innerHTML = `
+            <div>Error fetching verse. Please try again later.</div>
+        `;
+        console.error('Error:', error);
+    }
+}
+
+fetchVerse();
+
+
+    </script>
+</body> 
+</html>
