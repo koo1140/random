@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Image to JSON Converter</title>
+    <style>
+        body {
+            font-family: 'Arial', sans-serif;
+            background-color: #121212;
+            color: #ffffff;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+        }
+
+        h1 {
+            margin-bottom: 20px;
+        }
+
+        #controls {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            margin-bottom: 20px;
+            gap: 10px;
+        }
+
+        label {
+            margin-bottom: 5px;
+        }
+
+        input[type="file"] {
+            padding: 10px;
+            border: none;
+            border-radius: 5px;
+            font-size: 16px;
+            background-color: #1e88e5;
+            color: #ffffff;
+            cursor: pointer;
+        }
+
+        #imageContainer {
+            margin-top: 20px;
+            display: none;
+            justify-content: center;
+            align-items: center;
+        }
+
+        #uploadedImage {
+            max-width: 100%;
+            height: auto;
+            display: block;
+        }
+
+        .grid-container {
+            display: grid;
+            grid-template-columns: repeat(64, 12px); /* Smaller grid size */
+            grid-gap: 2px;
+            justify-content: center;
+            margin: 20px;
+            overflow: auto;
+            max-height: 600px; /* Limit the height for scrolling */
+        }
+
+        .grid-cell {
+            width: 12px;
+            height: 12px;
+            border-radius: 5px;
+            background-color: #333333;
+            cursor: pointer;
+            transition: background-color 0.3s;
+        }
+
+        pre {
+            background-color: #212121;
+            padding: 10px;
+            border-radius: 5px;
+            max-width: 90%;
+            overflow-x: auto;
+            text-align: left;
+            white-space: pre-wrap;
+            font-size: 14px;
+            line-height: 1.5;
+        }
+    </style>
+</head>
+<body>
+    <h1>Image to JSON Converter</h1>
+
+    <div id="controls">
+        <label for="fileInput">Upload or Drag & Drop Image:</label>
+        <input type="file" id="fileInput" accept="image/png, image/jpeg, image/svg+xml">
+        <p>Or paste an image here.</p>
+    </div>
+
+    <div id="imageContainer">
+        <img id="uploadedImage" src="" alt="Uploaded Image">
+    </div>
+
+    <h2>Generated JSON:</h2>
+    <pre id="output"></pre>
+
+    <div class="grid-container" id="grid"></div>
+
+    <script>
+        const fileInput = document.getElementById('fileInput');
+        const imageContainer = document.getElementById('imageContainer');
+        const uploadedImage = document.getElementById('uploadedImage');
+        const output = document.getElementById('output');
+        const gridContainer = document.getElementById('grid');
+        const gridSize = 64; // 64x64 grid size
+
+        // Create a canvas to draw the image and extract pixel data
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+
+        fileInput.addEventListener('change', handleFileSelect);
+
+        // Handle image selection (upload or paste)
+        function handleFileSelect(event) {
+            const file = event.target.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    const img = new Image();
+                    img.onload = function() {
+                        processImage(img);
+                    };
+                    img.src = e.target.result;
+                    imageContainer.style.display = 'flex';
+                    uploadedImage.src = img.src;
+                };
+                reader.readAsDataURL(file);
+            }
+        }
+
+        // Process the uploaded image
+        function processImage(img) {
+            const aspectRatio = img.width / img.height;
+
+            // Resize image to fit into 64x64 grid, preserving aspect ratio
+            const newWidth = Math.min(img.width, gridSize);
+            const newHeight = Math.min(img.height, gridSize);
+            const scaledWidth = newWidth;
+            const scaledHeight = newHeight;
+
+            canvas.width = scaledWidth;
+            canvas.height = scaledHeight;
+
+            // Draw the image on the canvas
+            ctx.drawImage(img, 0, 0, scaledWidth, scaledHeight);
+
+            // Extract pixel data from the canvas
+            const imageData = ctx.getImageData(0, 0, scaledWidth, scaledHeight);
+            const pixels = [];
+
+            for (let y = 0; y < scaledHeight; y++) {
+                for (let x = 0; x < scaledWidth; x++) {
+                    const index = (y * scaledWidth + x) * 4;
+                    const r = imageData.data[index];
+                    const g = imageData.data[index + 1];
+                    const b = imageData.data[index + 2];
+                    const a = imageData.data[index + 3];
+                    if (a > 0) {  // If the pixel is not transparent
+                        const color = `rgb(${r}, ${g}, ${b})`;
+                        pixels.push({ x, y, color });
+                    }
+                }
+            }
+
+            // Update JSON output and grid display
+            updateJSON(pixels);
+            createGrid(pixels);
+        }
+
+        // Update JSON output
+        function updateJSON(pixels) {
+            const jsonOutput = {
+                name: "Uploaded Image",
+                background: "#121212", // Dark background for small images
+                pixels: pixels
+            };
+            output.textContent = JSON.stringify(jsonOutput, null, 2);
+        }
+
+        // Create the 64x64 grid based on pixel data
+        function createGrid(pixels) {
+            gridContainer.innerHTML = '';
+            const gridData = Array.from({ length: gridSize * gridSize }, (_, i) => {
+                const cell = document.createElement('div');
+                cell.classList.add('grid-cell');
+                const pixel = pixels.find(p => p.x + p.y * gridSize === i);
+                cell.style.backgroundColor = pixel ? pixel.color : '#333333'; // Use dark color for empty cells
+                gridContainer.appendChild(cell);
+            });
+        }
+
+    </script>
+</body>
+</html>
