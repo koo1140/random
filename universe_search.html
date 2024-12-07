@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Universe Search</title>
+  <style>
+    /* General Reset */
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: "Comic Sans MS", cursive, sans-serif;
+      color: white;
+      margin: 0;
+      background: linear-gradient(120deg, #8500d9, #8500d9);
+      background-size: 400% 400%;
+    }
+
+    h1 {
+      font-size: 3rem;
+      margin: 1rem auto 0.5rem;
+      text-shadow: 0 2px 10px rgba(255, 255, 255, 0.8);
+      text-align: center;
+    }
+
+    p {
+      font-size: 1.2rem;
+      margin-bottom: 1rem;
+      text-align: center;
+    }
+
+    .search-container {
+      width: 100%;
+      max-width: 500px;
+      margin: 0 auto 1rem;
+    }
+
+    .search-bar {
+      width: 100%;
+      padding: 14px;
+      border: none;
+      border-radius: 12px;
+      background: rgba(50, 50, 50, 0.8);
+      color: white;
+      font-size: 1rem;
+      outline: none;
+      box-shadow: 0 4px 10px rgba(0, 0, 0, 0.3);
+      transition: background 0.3s ease, box-shadow 0.3s ease;
+    }
+
+    .search-bar::placeholder {
+      color: rgba(200, 200, 200, 0.7);
+    }
+
+    .search-bar:focus {
+      background: rgba(70, 70, 70, 0.9);
+      box-shadow: 0 4px 20px rgba(255, 255, 255, 0.4);
+    }
+
+    .results {
+      width: 90%;
+      max-width: 800px;
+      margin: 0 auto;
+      padding-bottom: 2rem;
+    }
+
+    .result {
+      background: rgba(255, 255, 255, 0.1);
+      padding: 15px;
+      margin-bottom: 15px;
+      border-radius: 8px;
+      box-shadow: 0 4px 10px rgba(0, 0, 0, 0.2);
+    }
+
+    .result img {
+      max-width: 100%;
+      border-radius: 8px;
+    }
+
+    .result h3 {
+      font-size: 1.5rem;
+      margin: 0 0 10px;
+    }
+
+    .result p {
+      font-size: 1rem;
+      margin: 0;
+    }
+  </style>
+</head>
+<body>
+  <h1>Universe Search</h1>
+  <p>Search about anything in the universe.</p>
+  <div class="search-container">
+    <input id="searchBar" type="text" class="search-bar" placeholder="Search anything (eg. cat)">
+  </div>
+  <div class="results" id="results"></div>
+
+  <script>
+    const searchBar = document.getElementById('searchBar');
+    const resultsContainer = document.getElementById('results');
+
+    let currentQuery = '';
+    let nextOffset = 0;
+    let isLoading = false;
+
+    async function fetchResults(query, offset = 0) {
+      const url = `https://en.wikipedia.org/w/api.php?action=query&format=json&origin=*&prop=extracts|pageimages&exintro&explaintext&piprop=thumbnail&pithumbsize=200&generator=search&gsrsearch=${encodeURIComponent(query)}&gsroffset=${offset}`;
+      const response = await fetch(url);
+      const data = await response.json();
+      return data.query ? { results: Object.values(data.query.pages), nextOffset: data.continue?.gsroffset } : { results: [], nextOffset: null };
+    }
+
+    function displayResults(results) {
+      results.forEach(result => {
+        const resultDiv = document.createElement('div');
+        resultDiv.classList.add('result');
+
+        const title = document.createElement('h3');
+        title.textContent = result.title;
+
+        const description = document.createElement('p');
+        description.textContent = result.extract || 'No description available.';
+
+        resultDiv.appendChild(title);
+        if (result.thumbnail) {
+          const image = document.createElement('img');
+          image.src = result.thumbnail.source;
+          resultDiv.appendChild(image);
+        }
+        resultDiv.appendChild(description);
+        resultsContainer.appendChild(resultDiv);
+      });
+    }
+
+    async function loadMore() {
+      if (isLoading || !currentQuery || nextOffset === null) return;
+      isLoading = true;
+      const { results, nextOffset: newOffset } = await fetchResults(currentQuery, nextOffset);
+      displayResults(results);
+      nextOffset = newOffset;
+      isLoading = false;
+    }
+
+    searchBar.addEventListener('input', async (e) => {
+      const query = e.target.value.trim();
+      if (query.length > 2 && query !== currentQuery) {
+        currentQuery = query;
+        nextOffset = 0;
+        resultsContainer.innerHTML = '';
+        const { results, nextOffset: newOffset } = await fetchResults(query);
+        displayResults(results);
+        nextOffset = newOffset;
+      }
+    });
+
+    window.addEventListener('scroll', () => {
+      if (window.innerHeight + window.scrollY >= document.body.offsetHeight - 100) {
+        loadMore();
+      }
+    });
+
+    // Function to get query parameter from URL
+    function getQueryParameter(name) {
+      const urlParams = new URLSearchParams(window.location.search);
+      return urlParams.get(name);
+    }
+
+    // On page load, check for query parameter and trigger search
+    window.onload = async () => {
+      const query = getQueryParameter('query');
+      if (query) {
+        searchBar.value = query; // Set the search bar value
+        currentQuery = query; // Set the current query
+        const { results, nextOffset: newOffset } = await fetchResults(query);
+        displayResults(results);
+        nextOffset = newOffset;
+      }
+    };
+  </script>
+</body>
+</html>
