@@ -1,0 +1,572 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>HTML Website Builder</title>
+  <style>
+/* Global Reset and Base Styling */
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+:root {
+  --bg-primary: #121212;
+  --bg-secondary: #1e1e1e;
+  --bg-tertiary: #333333;
+  --text-primary: #e0e0e0;
+  --text-secondary: #b0b0b0;
+  --accent-primary: #1e90ff;
+  --accent-hover: #1c86e0;
+  --border-color: #444;
+  --bg-iframe: #222;
+  --bg-editor: #1c1c1c;
+  --input-bg: #2a2a2a;
+  --input-border: #555;
+  --input-focus: #1e90ff;
+  --button-bg: #444;
+  --button-hover: #1c86e0;
+  --popup-bg: #1c1c1c;
+}
+
+/* Body and Layout */
+body {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  line-height: 1.6;
+}
+
+/* Topbar Styling */
+#topbar {
+  background-color: var(--bg-secondary);
+  color: var(--text-primary);
+  display: flex;
+  justify-content: space-between;
+  padding: 12px 24px;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+  border-radius: 12px;
+  margin: 15px;
+  transition: background-color 0.3s ease;
+}
+
+#topbar button {
+  background: var(--button-bg);
+  border: 1px solid var(--border-color);
+  color: var(--text-primary);
+  cursor: pointer;
+  padding: 12px 18px;
+  font-size: 16px;
+  font-weight: 600;
+  transition: all 0.3s ease;
+  border-radius: 10px;
+}
+
+#topbar button:hover {
+  background-color: var(--button-hover);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.2);
+}
+
+/* Main Layout Styling */
+#main {
+  flex: 1;
+  display: flex;
+  margin: 0 15px 15px;
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
+  background: linear-gradient(135deg, var(--bg-secondary) 0%, var(--bg-primary) 100%);
+}
+
+/* Sidebar Styling */
+#sidebar {
+  width: 350px;
+  background-color: var(--bg-tertiary);
+  border-right: 1px solid var(--border-color);
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 4px 0 15px rgba(0, 0, 0, 0.1);
+  border-radius: 12px 0 0 12px;
+}
+
+#sidebar button {
+  background-color: var(--accent-primary);
+  color: white;
+  border: none;
+  padding: 12px 18px;
+  border-radius: 10px;
+  cursor: pointer;
+  margin-bottom: 15px;
+  font-size: 16px;
+  font-weight: 600;
+  transition: all 0.3s ease;
+}
+
+#sidebar button:hover {
+  background-color: var(--accent-hover);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.2);
+}
+
+/* Panels and Preview Styling */
+#codePanel, #designerPanel {
+  flex: 1;
+  display: none;
+  height: 100%;
+  background-color: var(--bg-secondary);
+  border-radius: 0 12px 12px 0;
+}
+
+#codePanel.active, #designerPanel.active {
+  display: flex;
+  flex-direction: column;
+}
+
+#codeEditor, #livePreview {
+  width: 100%;
+  height: 100%;
+  padding: 20px;
+  font-family: 'Consolas', 'Courier New', monospace;
+  font-size: 16px;
+  border: none;
+  outline: none;
+  background-color: var(--bg-iframe);
+  color: var(--text-primary);
+  border-radius: 0 12px 12px 0;
+  resize: none;
+}
+
+/* Popup Styling */
+.popup {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: var(--popup-bg);
+  color: var(--text-primary);
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);
+  padding: 25px;
+  z-index: 1000;
+  display: none;
+  border-radius: 15px;
+  width: 400px;
+}
+
+.popup.active {
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+}
+
+.popup-content {
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+}
+
+.popup-label {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.popup-input, .popup-select {
+  padding: 10px;
+  font-size: 14px;
+  border: 1px solid var(--input-border);
+  border-radius: 8px;
+  background-color: var(--input-bg);
+  color: var(--text-primary);
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+input, select {
+    padding: 10px;
+  font-size: 14px;
+  border: 1px solid var(--input-border);
+  border-radius: 8px;
+  background-color: var(--input-bg);
+  color: var(--text-primary);
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.popup-input:focus, .popup-select:focus {
+  border-color: var(--input-focus);
+}
+input:focus, select:focus {
+     border-color: var(--input-focus);
+}
+
+.popup-buttons {
+  display: flex;
+  gap: 10px;
+}
+
+.popup-btn {
+  padding: 10px 20px;
+  font-size: 14px;
+  font-weight: 600;
+  border-radius: 8px;
+  cursor: pointer;
+  border: none;
+  transition: background-color 0.3s, transform 0.2s;
+}
+
+.popup-primary-btn {
+  background-color: var(--accent-primary);
+  color: white;
+}
+
+.popup-primary-btn:hover {
+  background-color: var(--accent-hover);
+  transform: translateY(-2px);
+}
+
+.popup-secondary-btn {
+  background-color: var(--bg-secondary);
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+}
+
+.popup-secondary-btn:hover {
+  background-color: var(--bg-tertiary);
+}
+
+/* Element Configuration Popup */
+.config-popup {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: var(--popup-bg);
+  color: var(--text-primary);
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);
+  padding: 25px;
+  z-index: 1000;
+  display: none;
+  border-radius: 15px;
+  width: 400px;
+}
+
+.config-popup.active {
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+}
+
+.config-popup .popup-label {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.config-popup .popup-input {
+  padding: 10px;
+  font-size: 14px;
+  border: 1px solid var(--input-border);
+  border-radius: 8px;
+  background-color: var(--input-bg);
+  color: var(--text-primary);
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.config-popup .popup-buttons {
+  display: flex;
+  gap: 10px;
+}
+
+.config-popup .popup-btn {
+  padding: 10px 20px;
+  font-size: 14px;
+  font-weight: 600;
+  border-radius: 8px;
+  cursor: pointer;
+  border: none;
+  transition: background-color 0.3s, transform 0.2s;
+}
+
+.config-popup .popup-primary-btn {
+  background-color: var(--accent-primary);
+  color: white;
+}
+
+.config-popup .popup-primary-btn:hover {
+  background-color: var(--accent-hover);
+  transform: translateY(-2px);
+}
+
+.config-popup .popup-secondary-btn {
+  background-color: var(--bg-secondary);
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+}
+
+.config-popup .popup-secondary-btn:hover {
+  background-color: var(--bg-tertiary);
+}
+.popup-select {
+  padding: 10px;
+  font-size: 14px;
+  border: 1px solid var(--input-border);
+  border-radius: 8px;
+  background-color: var(--input-bg);
+  color: var(--text-primary);
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.popup-select:focus {
+  border-color: var(--input-focus);
+}
+
+/* Option styling for select element */
+.popup-select option {
+  background-color: var(--bg-secondary);
+  color: var(--text-primary);
+  border: none;
+  padding: 10px;
+}
+
+.popup-select option:hover {
+  background-color: var(--bg-tertiary);
+}
+.popup-input,
+#elementHtml {
+  padding: 10px;
+  font-size: 14px;
+  border: 1px solid var(--input-border);
+  border-radius: 8px;
+  background-color: var(--input-bg);
+  color: var(--text-primary);
+  outline: none;
+  transition: border-color 0.2s;
+  resize: vertical;
+}
+
+.popup-input:focus,
+#elementHtml:focus {
+  border-color: var(--input-focus);
+}
+#elementsList {
+  max-height: 100%; /* Adjust this value based on your design */
+  overflow-y: auto;  /* Enables vertical scrolling */
+  padding-right: 10px; /* To avoid the scrollbar overlapping the list items */
+}
+
+
+  </style>
+  
+</head>
+<body>
+
+<div id="topbar">
+  <button onclick="switchPanel('code')">Code Editor</button>
+  <button onclick="switchPanel('designer')">Visual Designer</button>
+</div>
+
+<div id="main">
+  <div id="sidebar">
+    <button onclick="showPopup('addElementPopup')">Add Element</button>
+    <h3>Elements Explorer</h3>
+    <ul id="elementsList"></ul>
+  </div>
+
+  <div id="codePanel">
+    <textarea id="codeEditor" placeholder="Write your HTML code here..."></textarea>
+  </div>
+
+  <div id="designerPanel">
+    <iframe id="livePreview"></iframe>
+  </div>
+</div>
+
+<div class="popup" id="addElementPopup">
+  <h3>Add New Element</h3>
+  <label for="elementType">Element Type</label>
+  <select id="elementType">
+    <option value="div">div</option>
+    <option value="p">p</option>
+    <option value="input">input</option>
+    <option value="h1">h1</option>
+    <option value="h2">h2</option>
+    <option value="h3">h3</option>
+    <option value="h4">h4</option>
+    <option value="h5">h5</option>
+    <option value="h6">h6</option>
+    <option value="ul">ul</option>
+    <option value="ol">ol</option>
+    <option value="li">li</option>
+    <option value="a">a</option>
+    <option value="img">img</option>
+    <option value="span">span</option>
+    <option value="strong">strong</option>
+    <option value="em">em</option>
+    <option value="table">table</option>
+    <option value="thead">thead</option>
+    <option value="tbody">tbody</option>
+    <option value="tr">tr</option>
+    <option value="td">td</option>
+    <option value="th">th</option>
+    <option value="form">form</option>
+    <option value="label">label</option>
+    <option value="select">select</option>
+    <option value="option">option</option>
+    <option value="textarea">textarea</option>
+    <option value="button">button</option>
+    <option value="footer">footer</option>
+    <option value="header">header</option>
+    <option value="nav">nav</option>
+    <option value="article">article</option>
+    <option value="section">section</option>
+    <option value="aside">aside</option>
+    <option value="main">main</option>
+    <option value="figure">figure</option>
+    <option value="figcaption">figcaption</option>
+    <option value="details">details</option>
+    <option value="summary">summary</option>
+    <option value="blockquote">blockquote</option>
+    <option value="code">code</option>
+    <option value="pre">pre</option>
+    <option value="hr">hr</option>
+    <option value="video">video</option>
+    <option value="audio">audio</option>
+    <option value="iframe">iframe</option>
+</select>
+
+  <label for="elementText">Element Text</label>
+  <input id="elementText" type="text" placeholder="Optional: Text content">
+  <div class="popup-buttons">
+    <button class="popup-btn popup-primary-btn" onclick="addElement()">Add</button>
+    <button class="popup-btn popup-secondary-btn" onclick="closePopup('addElementPopup')">Cancel</button>
+  </div>
+</div>
+
+<div class="config-popup" id="configPopup">
+  <h3>Edit Element</h3>
+  <label for="elementId">ID</label>
+  <input id="elementId" type="text">
+  <label for="elementClass">Class</label>
+  <input id="elementClass" type="text">
+  <label for="elementCss">CSS</label>
+  <input id="elementCss" type="text">
+  <label for="elementHtml">HTML Content</label>
+  <textarea id="elementHtml"></textarea>
+  <div class="popup-buttons">
+    <button class="popup-btn popup-primary-btn" onclick="saveElement()">Save</button>
+    <button class="popup-btn popup-secondary-btn" onclick="closePopup('configPopup')">Cancel</button>
+  </div>
+</div>
+
+<script>
+  const codeEditor = document.getElementById('codeEditor');
+  const livePreview = document.getElementById('livePreview');
+  const elementsList = document.getElementById('elementsList');
+  let selectedElement = null;
+
+  // Initialize the iframe document with a blank HTML structure
+  function initLivePreview() {
+    const iframeDoc = livePreview.contentDocument || livePreview.contentWindow.document;
+    iframeDoc.open();
+    iframeDoc.write('<!DOCTYPE html><html><head><title>Live Preview</title></head><body></body></html>');
+    iframeDoc.close();
+  }
+
+  initLivePreview();
+
+  function switchPanel(panel) {
+    document.querySelectorAll('#main > div').forEach(div => div.classList.remove('active'));
+    document.getElementById(`${panel}Panel`).classList.add('active');
+  }
+
+  function syncCode() {
+    const formattedHTML = formatHTML(livePreview.contentDocument.documentElement.outerHTML);
+    codeEditor.value = formattedHTML;
+  }
+
+  function syncPreview() {
+    const iframeDoc = livePreview.contentDocument || livePreview.contentWindow.document;
+    iframeDoc.open();
+    iframeDoc.write(codeEditor.value);
+    iframeDoc.close();
+    updateElementsExplorer();
+  }
+
+  function showPopup(id) {
+    document.getElementById(id).classList.add('active');
+  }
+
+  function closePopup(id) {
+    document.getElementById(id).classList.remove('active');
+  }
+
+  function addElement() {
+    const elementType = document.getElementById('elementType').value;
+    const elementText = document.getElementById('elementText').value;
+    const newElement = document.createElement(elementType);
+
+    if (elementText) {
+      newElement.textContent = elementText;
+    }
+
+    livePreview.contentDocument.body.appendChild(newElement);
+    updateElementsExplorer();
+    closePopup('addElementPopup');
+    syncCode();
+  }
+
+  function updateElementsExplorer() {
+    elementsList.innerHTML = '';
+    livePreview.contentDocument.querySelectorAll('*').forEach((el, index) => {
+      const li = document.createElement('li');
+      li.textContent = `${el.tagName.toLowerCase()} (#${index})`;
+      li.onclick = () => openConfigPopup(el);
+      elementsList.appendChild(li);
+    });
+  }
+
+  function openConfigPopup(element) {
+    selectedElement = element;
+    document.getElementById('elementId').value = element.id || '';
+    document.getElementById('elementClass').value = element.className || '';
+    document.getElementById('elementCss').value = element.style.cssText || '';
+    document.getElementById('elementHtml').value = element.innerHTML;
+    showPopup('configPopup');
+  }
+
+  function saveElement() {
+    if (selectedElement) {
+      selectedElement.id = document.getElementById('elementId').value;
+      selectedElement.className = document.getElementById('elementClass').value;
+      selectedElement.style.cssText = document.getElementById('elementCss').value;
+      selectedElement.innerHTML = document.getElementById('elementHtml').value;
+      syncCode();
+      updateElementsExplorer();
+      closePopup('configPopup');
+    }
+  }
+
+  // Format HTML to be indented and multiline
+  function formatHTML(html) {
+    const formatted = html.replace(/>\s*</g, '>\n<')
+                           .replace(/(\s*<\/[^>]+>)/g, '\n$1')
+                           .replace(/([^\n>])\n([^\n<])/g, '$1 $2')
+                           .replace(/(<[^\/][^>]*>)\n/g, '$1')
+                           .replace(/\n+/g, '\n');
+    return formatted.trim();
+  }
+
+  codeEditor.addEventListener('input', syncPreview);
+</script>
+
+</body>
+</html>
