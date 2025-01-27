@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Profile Encoder</title>
+  <style>
+    body {
+      margin: 0;
+      font-family: Arial, sans-serif;
+      background-color: #121212;
+      color: #ffffff;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+    }
+    .container {
+      max-width: 500px;
+      width: 90%;
+      background: #1e1e1e;
+      padding: 20px;
+      border-radius: 10px;
+      box-shadow: 0 4px 10px rgba(0, 0, 0, 0.3);
+    }
+    .input-group {
+      margin-bottom: 15px;
+    }
+    label {
+      display: block;
+      margin-bottom: 5px;
+      font-weight: bold;
+    }
+    input, textarea {
+      width: 100%;
+      padding: 10px;
+      border: none;
+      border-radius: 5px;
+      background: #2a2a2a;
+      color: #ffffff;
+    }
+    button {
+      width: 100%;
+      padding: 10px;
+      background: #4caf50;
+      color: white;
+      font-size: 16px;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+      transition: background 0.3s;
+    }
+    button:hover {
+      background: #45a049;
+    }
+    .result {
+      margin-top: 20px;
+      padding: 10px;
+      background: #2a2a2a;
+      border-radius: 5px;
+      word-wrap: break-word;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div id="create-profile">
+      <h2>Create Your Profile</h2>
+      <div class="input-group">
+        <label for="username">Name</label>
+        <input type="text" id="username" placeholder="Enter your name">
+      </div>
+      <div class="input-group">
+        <label for="interests">Interests</label>
+        <textarea id="interests" rows="4" placeholder="Enter your interests, separated by commas"></textarea>
+      </div>
+      <button onclick="generateURL()">Generate Profile Link</button>
+      <div id="result" class="result" style="display: none;"></div>
+    </div>
+    <div id="profile-view" style="display: none;">
+      <h2 id="profile-name">User Profile</h2>
+      <p><strong>Interests:</strong></p>
+      <ul id="profile-interests"></ul>
+    </div>
+  </div>
+
+  <script>
+    const CHARSET = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"; // Base62
+
+    // Encode to Base62
+    function encodeBase62(num) {
+      let encoded = '';
+      while (num > 0) {
+        encoded = CHARSET[num % 62] + encoded;
+        num = Math.floor(num / 62);
+      }
+      return encoded || CHARSET[0];
+    }
+
+    // Convert a string to a numeric value
+    function stringToNumber(str) {
+      let num = 0;
+      for (let i = 0; i < str.length; i++) {
+        num = num * 256 + str.charCodeAt(i);
+      }
+      return num;
+    }
+
+    // Generate profile URL with encoded data
+    function generateURL() {
+      const name = document.getElementById('username').value.trim();
+      const interests = document.getElementById('interests').value.trim();
+
+      if (!name || !interests) {
+        alert('Please fill in all fields!');
+        return;
+      }
+
+      // Convert interests to a number
+      const interestsNumber = stringToNumber(interests);
+
+      // Encode interests in Base62 (using numeric value to Base62)
+      const encodedInterests = encodeBase62(interestsNumber);
+
+      // Truncate or slice the result to ensure it fits within the 5-character limit
+      const truncatedEncoded = encodedInterests.slice(0, 5);
+
+      // Build the URL with encoded data
+      const link = `${window.location.origin}${window.location.pathname}?user=${name}-${truncatedEncoded}`;
+
+      const resultDiv = document.getElementById('result');
+      resultDiv.innerHTML = `<p>Your profile link:</p><a href="${link}" target="_blank">${link}</a>`;
+      resultDiv.style.display = 'block';
+    }
+
+    // Decode the URL and display profile
+    function decodeProfile() {
+      const queryParams = new URLSearchParams(window.location.search);
+      const userParam = queryParams.get('user');
+
+      if (userParam) {
+        const [name, encodedData] = userParam.split('-');
+
+        if (name && encodedData) {
+          // Decode Base62 back to number
+          let decodedNumber = 0;
+          for (let i = 0; i < encodedData.length; i++) {
+            decodedNumber = decodedNumber * 62 + CHARSET.indexOf(encodedData[i]);
+          }
+
+          // Convert decoded number back to string (interests)
+          let decodedInterests = '';
+          while (decodedNumber > 0) {
+            decodedInterests = String.fromCharCode(decodedNumber % 256) + decodedInterests;
+            decodedNumber = Math.floor(decodedNumber / 256);
+          }
+
+          // Show profile
+          document.getElementById('create-profile').style.display = 'none';
+          document.getElementById('profile-view').style.display = 'block';
+          document.getElementById('profile-name').textContent = name;
+
+          const interestsList = document.getElementById('profile-interests');
+          interestsList.innerHTML = '';
+          decodedInterests.split(',').forEach(interest => {
+            const li = document.createElement('li');
+            li.textContent = interest.trim();
+            interestsList.appendChild(li);
+          });
+        }
+      }
+    }
+
+    // Decode profile data on page load if ?user= is present in the URL
+    window.onload = decodeProfile;
+  </script>
+</body>
+</html>
