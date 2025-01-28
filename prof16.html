@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Profile Encoder</title>
+  <style>
+    body {
+      margin: 0;
+      font-family: Arial, sans-serif;
+      background-color: #121212;
+      color: #ffffff;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+    }
+    .container {
+      max-width: 500px;
+      width: 90%;
+      background: #1e1e1e;
+      padding: 20px;
+      border-radius: 10px;
+      box-shadow: 0 4px 10px rgba(0, 0, 0, 0.3);
+    }
+    .input-group {
+      margin-bottom: 15px;
+    }
+    label {
+      display: block;
+      margin-bottom: 5px;
+      font-weight: bold;
+    }
+    input, textarea {
+      width: 100%;
+      padding: 10px;
+      border: none;
+      border-radius: 5px;
+      background: #2a2a2a;
+      color: #ffffff;
+    }
+    button {
+      width: 100%;
+      padding: 10px;
+      background: #4caf50;
+      color: white;
+      font-size: 16px;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+      transition: background 0.3s;
+    }
+    button:hover {
+      background: #45a049;
+    }
+    .result {
+      margin-top: 20px;
+      padding: 10px;
+      background: #2a2a2a;
+      border-radius: 5px;
+      word-wrap: break-word;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div id="create-profile">
+      <h2>Create Your Profile</h2>
+      <div class="input-group">
+        <label for="username">Name (max 30 characters)</label>
+        <input type="text" id="username" maxlength="30" placeholder="Enter your name">
+      </div>
+      <div class="input-group">
+        <label for="interests">Interests (max 50 words)</label>
+        <textarea id="interests" rows="4" maxlength="300" placeholder="Enter your interests, separated by commas (max 50)"></textarea>
+      </div>
+      <button onclick="generateURL()">Generate Profile Link</button>
+      <div id="result" class="result" style="display: none;"></div>
+    </div>
+    <div id="profile-view" style="display: none;">
+      <h2 id="profile-name">User Profile</h2>
+      <p><strong>Interests:</strong></p>
+      <ul id="profile-interests"></ul>
+    </div>
+  </div>
+
+  <script>
+    const MAX_NAME_LENGTH = 30;  // Maximum name length
+    const MAX_INTERESTS_COUNT = 50;  // Maximum number of interest words
+
+    // Function to encode each character to its Base36 value (to reduce URL size)
+    function encodeBase36(value) {
+      return value.toString(36);  // Convert number to base36 (0-9, a-z)
+    }
+
+    // Function to decode a Base36 string back to number
+    function decodeBase36(encoded) {
+      return parseInt(encoded, 36);
+    }
+
+    // Encode a string into a URL-friendly format
+    function encodeToMemoryData(name, interests) {
+      // Convert the name and interests into a concatenated string of base36 numbers
+      const nameEncoded = name.split('').map(c => encodeBase36(c.charCodeAt(0))).join('');
+      const interestsEncoded = interests.split(',').map(interest => encodeBase36(interest.charCodeAt(0))).join('');
+      
+      // Combine both with a separator
+      return `${nameEncoded}#${interestsEncoded}`;
+    }
+
+    // Decode the memory number back into name and interests
+    function decodeFromMemoryData(memoryData) {
+      const parts = memoryData.split('#');
+      const namePart = parts[0];
+      const interestsPart = parts[1];
+
+      const nameDecoded = namePart.match(/.{1,2}/g).map(code => String.fromCharCode(decodeBase36(code))).join('');
+      const interestsDecoded = interestsPart.match(/.{1,2}/g).map(code => String.fromCharCode(decodeBase36(code))).join('');
+
+      return { name: nameDecoded, interests: interestsDecoded };
+    }
+
+    // Generate a profile URL
+    function generateURL() {
+      const name = document.getElementById('username').value.trim();
+      const interests = document.getElementById('interests').value.trim();
+
+      if (!name || !interests) {
+        alert('Please fill in all fields!');
+        return;
+      }
+
+      // Split interests into words, limit to max 50 words
+      const interestWords = interests.split(',').slice(0, MAX_INTERESTS_COUNT);
+      const interestString = interestWords.join(',');
+
+      // Encode name and interests into a memory-friendly format
+      const memoryData = encodeToMemoryData(name, interestString);
+
+      // Generate the profile URL with the encoded "memory" data
+      const link = `${window.location.origin}${window.location.pathname}?id=${encodeURIComponent(memoryData)}`;
+      const resultDiv = document.getElementById('result');
+      resultDiv.innerHTML = `<p>Your profile link:</p><a href="${link}" target="_blank">${link}</a>`;
+      resultDiv.style.display = 'block';
+    }
+
+    // Decode the profile data from the URL
+    function decodeProfile() {
+      const queryParams = new URLSearchParams(window.location.search);
+      const memoryData = queryParams.get('id');
+
+      if (memoryData) {
+        try {
+          // Decode the memory data
+          const { name, interests } = decodeFromMemoryData(decodeURIComponent(memoryData));
+
+          // Display the profile
+          document.getElementById('create-profile').style.display = 'none';
+          document.getElementById('profile-view').style.display = 'block';
+          document.getElementById('profile-name').textContent = name;
+
+          const interestsList = document.getElementById('profile-interests');
+          interestsList.innerHTML = '';
+          interests.split(',').forEach(interest => {
+            const li = document.createElement('li');
+            li.textContent = interest.trim();
+            interestsList.appendChild(li);
+          });
+        } catch (e) {
+          alert("Invalid data in URL!");
+        }
+      }
+    }
+
+    // Decode the profile on page load if ?id= is present
+    window.onload = decodeProfile;
+  </script>
+</body>
+</html>
