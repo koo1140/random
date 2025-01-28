@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Profile Encoder</title>
+  <style>
+    body {
+      margin: 0;
+      font-family: Arial, sans-serif;
+      background-color: #121212;
+      color: #ffffff;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+    }
+    .container {
+      max-width: 500px;
+      width: 90%;
+      background: #1e1e1e;
+      padding: 20px;
+      border-radius: 10px;
+      box-shadow: 0 4px 10px rgba(0, 0, 0, 0.3);
+    }
+    .input-group {
+      margin-bottom: 15px;
+    }
+    label {
+      display: block;
+      margin-bottom: 5px;
+      font-weight: bold;
+    }
+    input, textarea {
+      width: 100%;
+      padding: 10px;
+      border: none;
+      border-radius: 5px;
+      background: #2a2a2a;
+      color: #ffffff;
+    }
+    button {
+      width: 100%;
+      padding: 10px;
+      background: #4caf50;
+      color: white;
+      font-size: 16px;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+      transition: background 0.3s;
+    }
+    button:hover {
+      background: #45a049;
+    }
+    .result {
+      margin-top: 20px;
+      padding: 10px;
+      background: #2a2a2a;
+      border-radius: 5px;
+      word-wrap: break-word;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div id="create-profile">
+      <h2>Create Your Profile</h2>
+      <div class="input-group">
+        <label for="username">Name (max 30 characters)</label>
+        <input type="text" id="username" maxlength="30" placeholder="Enter your name">
+      </div>
+      <div class="input-group">
+        <label for="interests">Interests (max 50 words)</label>
+        <textarea id="interests" rows="4" maxlength="300" placeholder="Enter your interests, separated by commas (max 50)"></textarea>
+      </div>
+      <button onclick="generateURL()">Generate Profile Link</button>
+      <div id="result" class="result" style="display: none;"></div>
+    </div>
+    <div id="profile-view" style="display: none;">
+      <h2 id="profile-name">User Profile</h2>
+      <p><strong>Interests:</strong></p>
+      <ul id="profile-interests"></ul>
+    </div>
+  </div><script> 
+const MAX_NAME_LENGTH = 30;
+const MAX_INTERESTS_COUNT = 50;
+
+function arrayToBase64Url(buffer) {
+  let binary = '';
+  for (let i = 0; i < buffer.byteLength; i++) {
+    binary += String.fromCharCode(buffer[i]);
+  }
+  return btoa(binary)
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/, '');
+}
+
+function base64UrlToArray(base64Url) {
+  let base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+  while (base64.length % 4) {
+    base64 += '=';
+  }
+  const binaryString = atob(base64);
+  const buffer = new Uint8Array(binaryString.length);
+  for (let i = 0; i < binaryString.length; i++) {
+    buffer[i] = binaryString.charCodeAt(i);
+  }
+  return buffer;
+}
+
+function generateURL() {
+  const name = document.getElementById('username').value.trim();
+  const interestsInput = document.getElementById('interests').value.trim();
+
+  if (!name || !interestsInput) {
+    alert('Please fill in all fields!');
+    return;
+  }
+
+  // Process name
+  const trimmedName = name.slice(0, MAX_NAME_LENGTH);
+  const encoder = new TextEncoder();
+  const nameBytes = encoder.encode(trimmedName);
+
+  // Process interests
+  const interests = interestsInput.split(',')
+    .map(i => i.trim())
+    .filter(i => i)
+    .slice(0, MAX_INTERESTS_COUNT);
+
+  // Calculate buffer size
+  let bufferSize = 1 + nameBytes.length + 1; // name length + name + interest count
+  for (const interest of interests) {
+    bufferSize += 1 + encoder.encode(interest).length; // interest length + interest
+  }
+
+  // Create buffer
+  const buffer = new Uint8Array(bufferSize);
+  let offset = 0;
+
+  // Encode name
+  buffer[offset++] = nameBytes.length;
+  buffer.set(nameBytes, offset);
+  offset += nameBytes.length;
+
+  // Encode interest count
+  buffer[offset++] = interests.length;
+
+  // Encode interests
+  for (const interest of interests) {
+    const interestBytes = encoder.encode(interest);
+    const length = Math.min(interestBytes.length, 255);
+    buffer[offset++] = length;
+    buffer.set(interestBytes.subarray(0, length), offset);
+    offset += length;
+  }
+
+  // Generate URL
+  const base64Url = arrayToBase64Url(buffer);
+  const link = `${window.location.origin}${window.location.pathname}?id=${encodeURIComponent(base64Url)}`;
+  
+  document.getElementById('result').innerHTML = 
+    `<p>Your profile link:</p><a href="${link}" target="_blank">${link}</a>`;
+  document.getElementById('result').style.display = 'block';
+}
+
+function decodeProfile() {
+  const params = new URLSearchParams(window.location.search);
+  const base64Url = params.get('id');
+
+  if (base64Url) {
+    try {
+      const buffer = base64UrlToArray(base64Url);
+      const decoder = new TextDecoder();
+      let offset = 0;
+
+      // Decode name
+      const nameLength = buffer[offset++];
+      const name = decoder.decode(buffer.subarray(offset, offset + nameLength));
+      offset += nameLength;
+
+      // Decode interests
+      const interestCount = buffer[offset++];
+      const interests = [];
+      for (let i = 0; i < interestCount; i++) {
+        const length = buffer[offset++];
+        interests.push(decoder.decode(buffer.subarray(offset, offset + length)));
+        offset += length;
+      }
+
+      // Display profile
+      document.getElementById('create-profile').style.display = 'none';
+      document.getElementById('profile-view').style.display = 'block';
+      document.getElementById('profile-name').textContent = name;
+      
+      const list = document.getElementById('profile-interests');
+      list.innerHTML = interests.map(i => `<li>${i}</li>`).join('');
+    } catch (e) {
+      alert("Invalid profile data!");
+    }
+  }
+}
+
+window.onload = decodeProfile;
+</script></body>
+</html>
