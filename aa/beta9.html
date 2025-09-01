@@ -1,0 +1,561 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"/>
+<title>Photosphere — Guide & Live Preview (Android)</title>
+<style>
+:root{
+  --bg:#07070a; --panel:#0d0d10; --muted:#9aa; --accent:#1ed760;
+  --danger:#ff5a5a;
+}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0;background:var(--bg);color:#fff;font-family:Inter,system-ui,Roboto,Arial}
+.app{display:flex;flex-direction:column;height:100%}
+.header{display:flex;align-items:center;gap:12px;padding:10px;background:var(--panel);border-bottom:1px solid #111}
+.header h1{margin:0;font-size:16px}
+.container{flex:1;display:flex;gap:12px;padding:12px}
+.leftColumn{display:flex;flex-direction:column;gap:10px;flex:1;min-width:320px}
+.rightColumn{width:360px;max-width:40%;display:flex;flex-direction:column;gap:8px}
+.controls{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+select,input,button{padding:8px;border-radius:8px;border:0;background:#121214;color:#fff}
+button.primary{background:var(--accent);color:#000;font-weight:700}
+.small{font-size:12px;color:var(--muted)}
+.videoWrap{position:relative;border-radius:10px;overflow:hidden;background:#000;flex:1;min-height:320px}
+video#cam{width:100%;height:100%;object-fit:cover;display:block}
+canvas#overlay, canvas#preview3d, canvas#equirectLow{position:absolute;left:0;top:0;pointer-events:none}
+.statusBar{position:absolute;left:12px;top:12px;background:rgba(0,0,0,0.6);padding:8px;border-radius:8px}
+.progressUI{position:absolute;left:50%;top:12px;transform:translateX(-50%);background:rgba(0,0,0,0.6);padding:8px;border-radius:8px;display:flex;gap:8px;align-items:center;visibility:hidden}
+.progressBar{width:220px;height:8px;background:#222;border-radius:8px;overflow:hidden}
+.progressFill{height:100%;background:var(--accent);width:0%}
+.fileRow{display:flex;gap:8px;align-items:center;background:#0e0e11;padding:8px;border-radius:8px;margin-bottom:8px}
+.thumb{width:110px;height:66px;object-fit:cover;border-radius:6px;background:#111}
+.footer{height:env(safe-area-inset-bottom)}
+/* responsive: when landscape (wider), put controls left; when narrow (portrait), right column goes below */
+@media (max-width: 900px) {
+  .container{flex-direction:column}
+  .rightColumn{width:100%;max-width:none}
+}
+.guide-dot{position:absolute;width:14px;height:14px;border-radius:50%;background:var(--danger);display:flex;align-items:center;justify-content:center;font-size:11px;color:#fff;pointer-events:none}
+.legend{display:flex;gap:8px;align-items:center}
+.legend .box{width:12px;height:12px;border-radius:3px}
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="header">
+    <h1>Photosphere — Live Guide (Android)</h1>
+    <div class="small">Serve via HTTPS or http://localhost — Chrome on Android recommended</div>
+  </div>
+
+  <div class="container">
+    <div class="leftColumn">
+      <div class="controls">
+        <label class="small">Camera:</label>
+        <select id="cameraSelect"></select>
+        <button id="startBtn" class="primary">Start camera</button>
+        <button id="stopBtn">Stop</button>
+        <button id="captureBtn">Capture</button>
+        <label class="small" style="margin-left:auto">Auto: <input id="autoChk" type="checkbox" checked/></label>
+      </div>
+
+      <div class="videoWrap" id="videoWrap">
+        <video id="cam" autoplay playsinline muted></video>
+        <canvas id="preview3d"></canvas>
+        <canvas id="overlay"></canvas>
+        <canvas id="equirectLow" style="display:none"></canvas>
+
+        <div class="statusBar" id="status">Status: idle</div>
+        <div class="progressUI" id="progressUI"><div class="small" id="progressText">Processing...</div><div class="progressBar"><div class="progressFill" id="progressFill"></div></div></div>
+      </div>
+
+      <div style="display:flex;gap:8px;align-items:center">
+        <div class="legend"><div class="box" style="background:var(--accent)"></div><div class="small">Captured</div></div>
+        <div class="legend"><div class="box" style="background:var(--danger)"></div><div class="small">Pending</div></div>
+        <div style="margin-left:auto" class="small">Captured: <span id="capturedCount">0</span> / <span id="totalCount">0</span></div>
+      </div>
+    </div>
+
+    <div class="rightColumn">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <div style="font-weight:700">Files</div>
+        <button id="refreshFiles">Refresh</button>
+      </div>
+
+      <div id="filesList" style="overflow:auto;max-height:520px;padding-top:8px"></div>
+
+      <div style="margin-top:8px">
+        <button id="processBtn" class="primary">Process & Save Panorama</button>
+      </div>
+
+      <div style="margin-top:8px" class="small">Tip: aim at the white ring. Markers on the mini-globe show which directions remain. Tap a marker to retake.</div>
+    </div>
+  </div>
+
+  <div class="footer"></div>
+</div>
+
+<script type="module">
+/* Photosphere Live Guide - Android-first single-file app
+   Features:
+   - Responsive layout (works portrait & landscape)
+   - Guide points (26) shown on mini-globe & overlay; markers appear/disappear as taken
+   - Device orientation based highlight & auto-capture (hold)
+   - Live equirect low-res compositing => displayed on Three.js sphere
+   - Post-process pixel-average stitching saved to IndexedDB
+   - Retake by tapping marker (globe)
+*/
+
+import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.162.0/build/three.module.js';
+
+/* ---------- UI elements ---------- */
+const cameraSelect = document.getElementById('cameraSelect');
+const startBtn = document.getElementById('startBtn');
+const stopBtn = document.getElementById('stopBtn');
+const captureBtn = document.getElementById('captureBtn');
+const autoChk = document.getElementById('autoChk');
+const camVideo = document.getElementById('cam');
+const overlay = document.getElementById('overlay');
+const overlayCtx = overlay.getContext('2d');
+const preview3d = document.getElementById('preview3d');
+const equirectLow = document.getElementById('equirectLow');
+const statusEl = document.getElementById('status');
+const progressUI = document.getElementById('progressUI');
+const progressText = document.getElementById('progressText');
+const progressFill = document.getElementById('progressFill');
+const filesList = document.getElementById('filesList');
+const refreshFilesBtn = document.getElementById('refreshFiles');
+const processBtn = document.getElementById('processBtn');
+const capturedCountEl = document.getElementById('capturedCount');
+const totalCountEl = document.getElementById('totalCount');
+
+/* ---------- configuration ---------- */
+const yawSteps = [0,45,90,135,180,225,270,315];
+const pitchLayers = [45,0,-45];
+const guidePoints = [];
+for (let p of pitchLayers) for (let y of yawSteps) guidePoints.push({ yaw: y, pitch: p });
+guidePoints.push({ yaw: 0, pitch: 90 });
+guidePoints.push({ yaw: 0, pitch: -90 });
+guidePoints.forEach((g,i)=> g.name = `P${i+1}`);
+totalCountEl.textContent = guidePoints.length;
+
+/* ---------- state ---------- */
+let currentStream = null;
+let cameraDevices = [];
+let currentVideoTrack = null;
+let captured = []; // items align with guidePoints indices: capture[i] corresponds to guidePoints[i] or null
+// initialize captured array with nulls to preserve indices
+captured = new Array(guidePoints.length).fill(null);
+
+let deviceYaw = 0, devicePitch = 0, deviceRoll = 0, hasOrientation = false;
+let autoCaptureHold = 1600;
+let tolerance = 12;
+let holdTimer = null;
+
+/* ---------- IndexedDB (store panoramas) ---------- */
+const DB_NAME = 'photosphere_guide_db';
+const STORE_NAME = 'panos';
+function openDb(){ return new Promise((res,rej)=>{ const rq = indexedDB.open(DB_NAME,1); rq.onupgradeneeded = ()=>{ const db = rq.result; if (!db.objectStoreNames.contains(STORE_NAME)) db.createObjectStore(STORE_NAME, { keyPath: 'id' }); }; rq.onsuccess = ()=> res(rq.result); rq.onerror = ()=> rej(rq.error); }); }
+async function savePanoToDb(id, meta, blob){ const db = await openDb(); return new Promise((res,rej)=>{ const tx = db.transaction(STORE_NAME,'readwrite'); tx.objectStore(STORE_NAME).put({ id, meta, blob, ts: Date.now() }); tx.oncomplete = ()=> res(); tx.onerror = ()=> rej(tx.error); }); }
+async function listPanoramas(){ const db = await openDb(); return new Promise((res,rej)=>{ const out=[]; const tx = db.transaction(STORE_NAME,'readonly'); const cur = tx.objectStore(STORE_NAME).openCursor(); cur.onsuccess = e => { const c = e.target.result; if (c){ out.push(c.value); c.continue(); } else res(out); }; cur.onerror = ()=> rej(cur.error); }); }
+async function deletePano(id){ const db = await openDb(); return new Promise((res,rej)=>{ const tx = db.transaction(STORE_NAME,'readwrite'); const r = tx.objectStore(STORE_NAME).delete(id); r.onsuccess = ()=> res(); r.onerror = ()=> rej(r.error); }); }
+
+/* ---------- camera enumeration & start/stop ---------- */
+async function enumerateCameras(){
+  try {
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    cameraDevices = devices.filter(d => d.kind === 'videoinput');
+    cameraSelect.innerHTML = '';
+    if (cameraDevices.length === 0) {
+      const o = document.createElement('option'); o.text = 'No camera'; cameraSelect.add(o); statusEl.textContent='No cameras found'; return;
+    }
+    cameraDevices.forEach((d,i)=>{ const o=document.createElement('option'); o.value=d.deviceId; o.text=d.label || `Camera ${i+1}`; cameraSelect.add(o); });
+    // try pick back camera by label
+    const backIdx = cameraDevices.findIndex(d=> /back|rear|environment/i.test(d.label));
+    if (backIdx >= 0) cameraSelect.selectedIndex = backIdx;
+    statusEl.textContent = `${cameraDevices.length} camera(s) available`;
+  } catch (e) {
+    console.error('enum error', e);
+    statusEl.textContent = 'Camera enumeration failed';
+  }
+}
+
+async function startCamera(deviceId){
+  stopCamera();
+  statusEl.textContent = 'Requesting camera...';
+  try {
+    const constraints = deviceId ? { video: { deviceId: { exact: deviceId } } } : { video: { facingMode: { ideal: 'environment' } } };
+    currentStream = await navigator.mediaDevices.getUserMedia(constraints);
+    camVideo.srcObject = currentStream;
+    currentVideoTrack = currentStream.getVideoTracks()[0];
+    // wait for loadedmetadata or timeout
+    await new Promise(resolve => {
+      let done = false;
+      const onMeta = ()=>{ if (!done){ done=true; camVideo.removeEventListener('loadedmetadata', onMeta); resolve(); } };
+      camVideo.addEventListener('loadedmetadata', onMeta);
+      setTimeout(()=>{ if (!done){ done=true; resolve(); } }, 2000);
+    });
+    try { await camVideo.play(); } catch(e){ console.warn('video.play error', e); }
+    // wait for dims
+    const dimsOk = await waitForVideoSize(3000);
+    if (!dimsOk) statusEl.textContent = 'Camera running — dims not available'; else statusEl.textContent = `Camera: ${camVideo.videoWidth}x${camVideo.videoHeight}`;
+    await enumerateCameras(); // refresh labels
+    resizeCanvases();
+    startOverlayLoop();
+    ensureThreePreview();
+    fillEquirectBackground();
+    updateLiveEquirect();
+  } catch (err) {
+    console.error('startCamera error', err);
+    if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') statusEl.textContent = 'Permission denied — allow camera in site settings';
+    else statusEl.textContent = 'Camera error: ' + (err.message || err.name || err);
+  }
+}
+function stopCamera(){
+  if (currentStream) { for (const t of currentStream.getTracks()) try{ t.stop(); } catch(e){} currentStream=null; currentVideoTrack=null; camVideo.srcObject=null; statusEl.textContent='Camera stopped'; }
+}
+function waitForVideoSize(timeoutMs=3000){
+  return new Promise(res=>{
+    const start = Date.now();
+    (function check(){
+      if (camVideo.videoWidth > 0 && camVideo.videoHeight > 0) return res(true);
+      if (Date.now() - start > timeoutMs) return res(false);
+      setTimeout(check, 150);
+    })();
+  });
+}
+
+/* ---------- orientation (Android) ---------- */
+function initOrientation(){
+  window.addEventListener('deviceorientation', ev=>{
+    deviceYaw = (ev.alpha ?? 0) % 360;
+    devicePitch = ev.beta ?? 0;
+    deviceRoll = ev.gamma ?? 0;
+    hasOrientation = true;
+  }, true);
+}
+
+/* ---------- overlay & mini-globe visuals ---------- */
+const globeCx = 110, globeCy = 110, globeR = 90;
+function resizeCanvases(){
+  const w = camVideo.videoWidth || camVideo.clientWidth || window.innerWidth;
+  const h = camVideo.videoHeight || camVideo.clientHeight || window.innerHeight;
+  overlay.width = w; overlay.height = h;
+  preview3d.width = w; preview3d.height = h;
+  equirectLow.width = 1024; equirectLow.height = 512;
+  if (threeRenderer) threeRenderer.setSize(w,h);
+}
+function mapYawPitchToGlobe(yaw, pitch){
+  const yawR = yaw * Math.PI/180;
+  const pr = pitch/90;
+  const rr = globeR * (1 - Math.abs(pr)*0.45);
+  const gx = globeCx + Math.cos(yawR) * rr;
+  const gy = globeCy - pr * globeR * 0.75;
+  return [gx, gy];
+}
+function drawOverlay(){
+  if (!overlay.width || !overlay.height) return;
+  const ctx = overlayCtx; const w = overlay.width, h = overlay.height;
+  ctx.clearRect(0,0,w,h);
+  ctx.fillStyle = 'rgba(0,0,0,0.12)'; ctx.fillRect(0,0,w,h);
+  // draw mini globe
+  ctx.save();
+  ctx.beginPath(); ctx.arc(globeCx, globeCy, globeR, 0, Math.PI*2); ctx.fillStyle = 'rgba(12,12,14,0.95)'; ctx.fill(); ctx.strokeStyle='rgba(255,255,255,0.06)'; ctx.lineWidth=1; ctx.stroke();
+  ctx.strokeStyle = 'rgba(255,255,255,0.04)';
+  for (let a=0;a<360;a+=45){ const [x1,y1]=mapYawPitchToGlobe(a,-90); const [x2,y2]=mapYawPitchToGlobe(a,90); ctx.beginPath(); ctx.moveTo(x1,y1); ctx.lineTo(x2,y2); ctx.stroke(); }
+  for (let p=-60;p<=60;p+=30){ ctx.beginPath(); for (let a=0;a<=360;a+=10){ const [x,y] = mapYawPitchToGlobe(a,p); if (a===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);} ctx.stroke();}
+  // draw points
+  for (let i=0;i<guidePoints.length;i++){
+    const gp = guidePoints[i];
+    const [mx,my] = mapYawPitchToGlobe(gp.yaw, gp.pitch);
+    const taken = !!captured[i];
+    ctx.beginPath(); ctx.arc(mx,my, taken ? 10 : 8, 0, Math.PI*2); ctx.fillStyle = taken ? 'rgba(30,215,96,0.95)' : 'rgba(255,80,80,0.95)'; ctx.fill();
+    ctx.fillStyle = '#fff'; ctx.font='11px system-ui'; ctx.fillText(taken ? '✓' : (i+1), mx+14, my+4);
+    if (taken) {
+      const img = new Image(); img.src = captured[i].dataUrl;
+      (function(img, tx, ty){ img.onload = ()=>{ ctx.save(); ctx.beginPath(); ctx.rect(tx-18, ty-12, 36, 24); ctx.clip(); ctx.drawImage(img, tx-18, ty-12, 36, 24); ctx.restore(); }; })(img, mx, my);
+    }
+  }
+  // device heading on globe
+  if (hasOrientation) {
+    const [dx,dy] = mapYawPitchToGlobe(deviceYaw, devicePitch);
+    ctx.beginPath(); ctx.arc(dx,dy,6,0,Math.PI*2); ctx.fillStyle='rgba(0,150,255,0.95)'; ctx.fill(); ctx.strokeStyle='#000'; ctx.lineWidth=1; ctx.stroke();
+  }
+  ctx.restore();
+
+  // draw target ring in main view for next needed point
+  const nextIdx = nextPointIndex();
+  const tgt = guidePoints[nextIdx];
+  const u = ((tgt.yaw % 360)+360)%360 / 360;
+  const v = 1 - ((tgt.pitch + 90)/180);
+  const sx = Math.round(u * w), sy = Math.round(v * h);
+  ctx.strokeStyle = 'rgba(255,255,255,0.95)'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(sx,sy,22,0,Math.PI*2); ctx.stroke();
+  const pxYaw = (tolerance/360) * w; const pxPitch = (tolerance/180) * h; const rad = Math.max(pxYaw, pxPitch) * 1.15;
+  // highlight if device inside tolerance
+  let isInside = false;
+  if (hasOrientation) {
+    const yd = angleDiff(deviceYaw, tgt.yaw); const pd = Math.abs(devicePitch - tgt.pitch);
+    isInside = (yd <= tolerance && pd <= tolerance);
+  }
+  ctx.strokeStyle = isInside ? 'rgba(30,215,96,0.8)' : 'rgba(30,215,96,0.4)'; ctx.beginPath(); ctx.arc(sx,sy,rad,0,Math.PI*2); ctx.stroke();
+
+  // top-left info
+  ctx.fillStyle = 'rgba(0,0,0,0.5)'; ctx.fillRect(12,12,340,40);
+  ctx.fillStyle = '#fff'; ctx.font='13px system-ui';
+  ctx.fillText(`Yaw:${deviceYaw.toFixed(1)}° Pitch:${devicePitch.toFixed(1)}°`, 20, 36);
+}
+
+/* overlay click: retake by clicking near a globe marker */
+overlay.addEventListener('click', (ev)=>{
+  const rect = overlay.getBoundingClientRect(); const x = ev.clientX - rect.left, y = ev.clientY - rect.top;
+  for (let i=0;i<guidePoints.length;i++){
+    const [mx,my] = mapYawPitchToGlobe(guidePoints[i].yaw, guidePoints[i].pitch);
+    if (Math.hypot(mx - x, my - y) < 18) {
+      if (!confirm(`Retake point ${i+1}?`)) return;
+      captureForIndex(i);
+      return;
+    }
+  }
+});
+
+/* ---------- helper functions ---------- */
+function angleDiff(a,b){ let d = Math.abs(((a - b + 180) % 360 + 360) % 360 - 180); return d; }
+function nextPointIndex(){ for (let i=0;i<guidePoints.length;i++) if (!captured[i]) return i; return guidePoints.length - 1; }
+
+/* ---------- low-res equirect live preview ---------- */
+const eqCtx = equirectLow.getContext('2d');
+function fillEquirectBackground(){
+  const W = equirectLow.width, H = equirectLow.height;
+  const g = eqCtx.createLinearGradient(0,0,0,H); g.addColorStop(0,'#1a1a1f'); g.addColorStop(1,'#050507');
+  eqCtx.fillStyle = g; eqCtx.fillRect(0,0,W,H);
+}
+function updateLiveEquirect(){
+  const W = equirectLow.width, H = equirectLow.height;
+  fillEquirectBackground();
+  eqCtx.globalCompositeOperation = 'lighter';
+  for (let i=0;i<captured.length;i++){
+    const c = captured[i];
+    if (!c || !c.dataUrl) continue;
+    const img = new Image(); img.src = c.dataUrl;
+    (function(img,c){
+      img.onload = () => {
+        const drawW = Math.max(48, Math.round(W * 0.35));
+        const drawH = Math.round(drawW * (img.height / img.width));
+        const u = ((c.yaw % 360) + 360) % 360 / 360;
+        const v = 1 - ((c.pitch + 90)/180);
+        let x = Math.round(u * W - drawW/2);
+        let y = Math.round(v * H - drawH/2);
+        eqCtx.globalAlpha = 0.95;
+        eqCtx.drawImage(img, x, y, drawW, drawH);
+        if (x < 0) eqCtx.drawImage(img, x + W, y, drawW, drawH);
+        if (x + drawW > W) eqCtx.drawImage(img, x - W, y, drawW, drawH);
+        eqCtx.globalAlpha = 1;
+        if (threeTexture) threeTexture.needsUpdate = true;
+      };
+    })(img,c);
+  }
+  // update captured count
+  capturedCountEl.textContent = captured.filter(Boolean).length;
+}
+
+/* ---------- Three.js live sphere ---------- */
+let threeRenderer=null, threeScene=null, threeCamera=null, threeSphere=null, threeTexture=null;
+function ensureThreePreview(){
+  if (threeRenderer) return;
+  threeRenderer = new THREE.WebGLRenderer({ canvas: preview3d, antialias: true });
+  threeRenderer.setSize(preview3d.width, preview3d.height);
+  threeScene = new THREE.Scene();
+  threeCamera = new THREE.PerspectiveCamera(75, preview3d.width/preview3d.height, 0.1, 1000);
+  threeCamera.position.set(0,0,0.1);
+  threeTexture = new THREE.CanvasTexture(equirectLow);
+  threeTexture.minFilter = THREE.LinearFilter; threeTexture.magFilter = THREE.LinearFilter;
+  const geo = new THREE.SphereGeometry(5, 64, 64); geo.scale(-1,1,1);
+  const mat = new THREE.MeshBasicMaterial({ map: threeTexture });
+  threeSphere = new THREE.Mesh(geo, mat);
+  threeScene.add(threeSphere);
+  window.addEventListener('deviceorientation', ev => {
+    const a = THREE.MathUtils.degToRad(ev.alpha || 0);
+    const b = THREE.MathUtils.degToRad(ev.beta || 0);
+    const g = THREE.MathUtils.degToRad(ev.gamma || 0);
+    const euler = new THREE.Euler(b, a, -g, 'YXZ');
+    threeCamera.quaternion.setFromEuler(euler);
+  }, true);
+  (function anim(){ requestAnimationFrame(anim); if (threeRenderer && threeScene && threeCamera) threeRenderer.render(threeScene, threeCamera); })();
+  window.addEventListener('resize', ()=>{ if (threeRenderer) { threeRenderer.setSize(overlay.width, overlay.height); threeCamera.aspect = overlay.width / overlay.height; threeCamera.updateProjectionMatrix(); }});
+}
+function updateEquirectTexture(){ if (threeTexture) threeTexture.needsUpdate = true; }
+
+/* ---------- capture logic ---------- */
+function captureForIndex(index){
+  if (camVideo.readyState < 2) { statusEl.textContent = 'Camera not ready'; return; }
+  const canvas = document.createElement('canvas');
+  canvas.width = camVideo.videoWidth || 1280; canvas.height = camVideo.videoHeight || 720;
+  const ctx = canvas.getContext('2d'); ctx.drawImage(camVideo, 0,0, canvas.width, canvas.height);
+  const dataUrl = canvas.toDataURL('image/jpeg', 0.92);
+  const gp = guidePoints[index];
+  captured[index] = { dataUrl, yaw: gp.yaw, pitch: gp.pitch, w: canvas.width, h: canvas.height };
+  updateLiveEquirect();
+  drawOverlay();
+}
+captureBtn.addEventListener('click', ()=> {
+  const i = nextPointIndex();
+  captureForIndex(i);
+});
+
+/* auto-capture based on orientation */
+function maybeAutoCapture(){
+  if (!autoChk.checked || !hasOrientation) return;
+  const i = nextPointIndex();
+  if (i >= guidePoints.length) return;
+  const t = guidePoints[i];
+  const yd = angleDiff(deviceYaw, t.yaw);
+  const pd = Math.abs(devicePitch - t.pitch);
+  const inside = (yd <= tolerance) && (pd <= tolerance);
+  if (inside) {
+    if (!holdTimer) { statusEl.textContent = `Aligned — hold ${(autoCaptureHold/1000).toFixed(1)}s`; holdTimer = setTimeout(()=>{ captureForIndex(i); holdTimer=null; }, autoCaptureHold); }
+  } else {
+    if (holdTimer) { clearTimeout(holdTimer); holdTimer=null; statusEl.textContent=''; }
+  }
+}
+
+/* overlay loop drives auto-capture + redraw */
+let overlayLoopStarted = false;
+function startOverlayLoop(){ if (overlayLoopStarted) return; overlayLoopStarted = true; (function loop(){ drawOverlay(); maybeAutoCapture(); requestAnimationFrame(loop); })(); }
+
+/* ---------- Stitching (pixel-average) ---------- */
+function setProgress(pct, txt=''){ if (pct>=0 && pct<100){ progressUI.style.visibility='visible'; progressText.textContent = txt || `${Math.round(pct)}%`; progressFill.style.width = `${Math.round(pct)}%`; } else { progressUI.style.visibility='hidden'; progressFill.style.width = '0%'; } }
+function loadImageToCanvas(dataUrl, maxW=640){ return new Promise((res,rej)=>{ const img=new Image(); img.onload=()=>{ const scale=Math.min(1, maxW/img.width); const cw=Math.max(4, Math.round(img.width*scale)); const ch=Math.max(4, Math.round(img.height*scale)); const c=document.createElement('canvas'); c.width=cw; c.height=ch; c.getContext('2d').drawImage(img,0,0,cw,ch); res({canvas:c,w:cw,h:ch}); }; img.onerror=rej; img.src=dataUrl; }); }
+function pixelToDir(sx,sy,sw,sh,fovH){ const cx=sw/2, cy=sh/2; const f=(sw/2)/Math.tan(fovH/2); const x=sx-cx, y=cy-sy, z=f; const L=Math.sqrt(x*x+y*y+z*z); return [x/L, y/L, z/L]; }
+function rotateDir(vec,yawDeg,pitchDeg){ const yaw = yawDeg*Math.PI/180, pitch = pitchDeg*Math.PI/180; let x=vec[0], y=vec[1], z=vec[2]; const cosP=Math.cos(pitch), sinP=Math.sin(pitch); let y2 = y*cosP - z*sinP; let z2 = y*sinP + z*cosP; const cosY=Math.cos(yaw), sinY=Math.sin(yaw); let x3 = x*cosY + z2*sinY; let z3 = -x*sinY + z2*cosY; return [x3,y2,z3]; }
+
+async function stitchCaptured({outW=2048,outH=1024,srcMax=640,fovDeg=60} = {}){
+  // gather only taken captures
+  const taken = captured.map((c,i)=> c ? ({...c, idx:i}) : null).filter(Boolean);
+  if (taken.length === 0) throw new Error('No captures');
+  setProgress(0,'Preparing images...');
+  const sources = [];
+  for (let t of taken){ const ld = await loadImageToCanvas(t.dataUrl, srcMax); sources.push({canvas:ld.canvas,w:ld.w,h:ld.h,yaw:t.yaw,pitch:t.pitch}); }
+  const W = outW, H = outH, total = W*H;
+  const accumR = new Float32Array(total), accumG = new Float32Array(total), accumB = new Float32Array(total);
+  const counts = new Uint32Array(total);
+  let totalSrc = sources.reduce((s, s2) => s + s2.w * s2.h, 0), processed = 0;
+  const fov = fovDeg * Math.PI/180;
+  for (let s of sources){
+    const data = s.canvas.getContext('2d').getImageData(0,0,s.w,s.h).data;
+    const step = Math.max(1, Math.floor(Math.sqrt((s.w*s.h)/90000)));
+    for (let y=0;y<s.h;y+=step){
+      await new Promise(r=>setTimeout(r,0));
+      for (let x=0;x<s.w;x+=step){
+        const i4 = (y*s.w+x)*4;
+        const r = data[i4], g = data[i4+1], b = data[i4+2], a = data[i4+3];
+        if (a < 10) { processed += step; continue; }
+        const dir = pixelToDir(x,y,s.w,s.h,fov);
+        const world = rotateDir(dir, s.yaw, s.pitch);
+        const vx = world[0], vy = world[1], vz = world[2];
+        const lon = Math.atan2(vx, vz), lat = Math.asin(Math.max(-1, Math.min(1, vy)));
+        let u = (lon + Math.PI) / (2*Math.PI), v = 1 - (lat + Math.PI/2) / Math.PI;
+        let px = Math.floor(u*W), py = Math.floor(v*H);
+        if (px < 0) px += W; if (px >= W) px -= W;
+        if (py < 0 || py >= H) { processed += step; continue; }
+        const outIdx = py * W + px;
+        accumR[outIdx] += r; accumG[outIdx] += g; accumB[outIdx] += b; counts[outIdx] ++;
+        processed += step;
+      }
+      setProgress(Math.min(99, (processed/totalSrc)*100), `Mapping ${Math.round((processed/totalSrc)*100)}%`);
+    }
+  }
+  setProgress(99,'Composing...');
+  const outC = document.createElement('canvas'); outC.width = W; outC.height = H;
+  const outCtx = outC.getContext('2d');
+  const outImg = outCtx.createImageData(W,H);
+  const batch = 20000;
+  for (let i=0;i<total;i+=batch){
+    const lim = Math.min(i+batch, total);
+    for (let j=i;j<lim;j++){
+      const di = j*4; const c = counts[j];
+      if (c === 0) { outImg.data[di] = 0; outImg.data[di+1] = 0; outImg.data[di+2] = 0; outImg.data[di+3] = 255; }
+      else { outImg.data[di] = Math.round(accumR[j]/c); outImg.data[di+1] = Math.round(accumG[j]/c); outImg.data[di+2] = Math.round(accumB[j]/c); outImg.data[di+3] = 255; }
+    }
+    await new Promise(r=>setTimeout(r,0));
+  }
+  outCtx.putImageData(outImg, 0, 0);
+  const blob = await new Promise(res => outC.toBlob(res, 'image/jpeg', 0.92));
+  setProgress(-1,'');
+  return { canvas: outC, blob };
+}
+
+/* ---------- files / UI ---------- */
+async function refreshFiles(){
+  filesList.innerHTML = '<div class="small">Loading…</div>';
+  try {
+    const list = await listPanoramas();
+    filesList.innerHTML = '';
+    if (!list || list.length === 0) { filesList.innerHTML = '<div class="small">No panoramas</div>'; return; }
+    for (let entry of list.reverse()){
+      const row = document.createElement('div'); row.className = 'fileRow';
+      const img = document.createElement('img'); img.className = 'thumb'; img.src = URL.createObjectURL(entry.blob);
+      const meta = document.createElement('div'); meta.innerHTML = `<div style="font-weight:700">${entry.id}</div><div class="small">${new Date(entry.ts).toLocaleString()}</div>`;
+      const actions = document.createElement('div'); actions.style.marginLeft = 'auto';
+      const open = document.createElement('button'); open.textContent = 'Open'; open.onclick = ()=> openPano(entry.blob);
+      const dl = document.createElement('button'); dl.textContent = 'Download'; dl.onclick = ()=> { const a=document.createElement('a'); a.href = img.src; a.download = entry.id + '.jpg'; a.click(); };
+      const del = document.createElement('button'); del.textContent = 'Delete'; del.onclick = async ()=> { if (confirm('Delete?')) { await deletePano(entry.id); refreshFiles(); } };
+      actions.append(open, dl, del);
+      row.append(img, meta, actions);
+      filesList.appendChild(row);
+    }
+  } catch (e) {
+    console.error('files refresh', e);
+    filesList.innerHTML = '<div class="small">Error loading files</div>';
+  }
+}
+async function openPano(blob){
+  const url = URL.createObjectURL(blob);
+  const loader = new THREE.TextureLoader();
+  loader.load(url, tex => { if (threeSphere && threeSphere.material) { threeSphere.material.map = tex; threeSphere.material.needsUpdate = true; }});
+  statusEl.textContent = 'Viewing saved panorama — move device to look around';
+}
+
+/* ---------- helpers to update UI counts ---------- */
+function updateCapturedCount(){ capturedCountEl.textContent = captured.filter(Boolean).length; }
+
+/* ---------- event wiring ---------- */
+startBtn.addEventListener('click', async ()=> { startBtn.disabled = true; await startCamera(cameraSelect.value); startBtn.disabled = false; });
+stopBtn.addEventListener('click', ()=> stopCamera());
+captureBtn.addEventListener('click', ()=> { const i = nextPointIndex(); captureForIndex(i); updateCapturedCount(); });
+refreshFilesBtn.addEventListener('click', refreshFiles);
+processBtn.addEventListener('click', async ()=> {
+  try {
+    const res = await stitchCaptured({ outW: 2048, outH: 1024, srcMax: 640, fovDeg: 60 });
+    const id = 'pano_' + Date.now();
+    await savePanoToDb(id, { sources: captured.filter(Boolean).length, w: res.canvas.width, h: res.canvas.height }, res.blob);
+    alert('Panorama saved to Files');
+    // clear captured to allow new session (you can change this behavior)
+    captured = new Array(guidePoints.length).fill(null);
+    updateLiveEquirect();
+    updateEquirectTexture();
+    updateCapturedCount();
+    refreshFiles();
+  } catch (e) {
+    console.error('stitch error', e);
+    alert('Processing error: ' + (e.message || e));
+  }
+});
+
+/* ---------- boot sequence ---------- */
+(async function boot(){
+  await enumerateCameras();
+  initOrientation();
+  resizeCanvases();
+  fillEquirectBackground();
+  updateLiveEquirect();
+  refreshFiles();
+  updateCapturedCount();
+  // overlay loop + 3d preview boundaries start after camera is started by user
+})();
+
+/* ---------- small public debug hook ---------- */
+window._photosphere = { guidePoints, captured, startCamera, stopCamera: stopCamera, refreshFiles };
+
+</script>
+</body>
+</html>
