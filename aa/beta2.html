@@ -1,0 +1,771 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+<title>Photosphere — standalone</title>
+<style>
+  :root{
+    --bg:#0b0b0f; --panel:#111; --muted:#aaa; --accent:#1ed760;
+  }
+  html,body{height:100%;margin:0;background:var(--bg);color:#fff;font-family:Inter,system-ui,Segoe UI,Roboto,'Helvetica Neue',Arial;}
+  #app{display:flex;flex-direction:column;height:100%;}
+  #nav{display:flex;background:#0c0c10;border-bottom:1px solid #1a1a1a;}
+  .tab{flex:1;padding:12px;text-align:center;cursor:pointer;user-select:none;color:var(--muted);}
+  .tab.active{background:#121217;color:#fff;font-weight:600}
+  #main{flex:1;position:relative;overflow:hidden}
+  /* Editor layout */
+  #editor, #files{position:absolute;inset:0;display:none;flex-direction:column;align-items:stretch;justify-content:flex-start;}
+  #editor.active, #files.active{display:flex}
+  /* Camera and overlays */
+  #cameraWrap{position:relative;flex:1;overflow:hidden;background:#000}
+  video#cam{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;background:#000}
+  canvas#overlay, canvas#equirectPreview, canvas#stitchProgressCanvas{position:absolute;inset:0;pointer-events:none;display:block}
+  /* Controls */
+  #controls{position:absolute;left:50%;transform:translateX(-50%);bottom:14px;display:flex;gap:10px;background:rgba(0,0,0,0.3);padding:8px;border-radius:10px}
+  button{padding:8px 12px;border-radius:8px;border:0;background:#222;color:#fff;font-weight:600;cursor:pointer}
+  button.secondary{background:#2a2a2a}
+  #status{position:absolute;top:12px;left:12px;background:rgba(0,0,0,0.45);padding:8px;border-radius:8px;font-size:13px}
+  /* Files */
+  #filesList{padding:12px;overflow:auto;height:100%}
+  .fileRow{display:flex;gap:8px;align-items:center;background:#0f0f12;padding:8px;border-radius:8px;margin-bottom:8px}
+  .thumb{width:110px;height:60px;object-fit:cover;border-radius:4px;background:#222}
+  .fileActions{margin-left:auto;display:flex;gap:6px}
+  .progressWrap{position:absolute;left:50%;transform:translateX(-50%);top:14px;background:rgba(0,0,0,0.6);padding:8px;border-radius:8px;display:flex;gap:8px;align-items:center}
+  .progressBar{width:200px;height:8px;background:#222;border-radius:8px;overflow:hidden}
+  .progressBarFill{height:100%;background:var(--accent);width:0%}
+  .small{font-size:12px;color:var(--muted)}
+  /* helper for mobile safe area */
+  footer{height:env(safe-area-inset-bottom)}
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="nav">
+    <div class="tab active" data-tab="editor">Editor</div>
+    <div class="tab" data-tab="files">Files</div>
+  </div>
+
+  <div id="main">
+    <!-- EDITOR -->
+    <div id="editor" class="active">
+      <div id="cameraWrap">
+        <video id="cam" autoplay playsinline muted></video>
+        <canvas id="overlay"></canvas>            <!-- guide points, cursor -->
+        <canvas id="equirectPreview"></canvas>    <!-- rough equirect live preview -->
+        <div id="status">Initializing camera...</div>
+        <div id="controls">
+          <button id="manualCaptureBtn">Manual capture</button>
+          <button id="autoToggleBtn" class="secondary">Auto: ON</button>
+          <button id="processBtn">Process & Stitch</button>
+        </div>
+        <div id="progressUI" style="display:none" class="progressWrap">
+          <div class="small" id="progressText">Processing...</div>
+          <div class="progressBar"><div class="progressBarFill" id="progressFill"></div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- FILES -->
+    <div id="files">
+      <div style="padding:12px;display:flex;gap:8px;align-items:center">
+        <button id="refreshFiles">Refresh</button>
+        <div class="small" style="margin-left:8px">Stored panoramas (IndexedDB)</div>
+      </div>
+      <div id="filesList"></div>
+    </div>
+  </div>
+
+  <footer></footer>
+</div>
+
+<script type="module">
+/* Photosphere — single-file app
+   Features:
+   - live camera preview
+   - 26 guide points (45° grid)
+   - tolerance + auto-capture + hold for 2s
+   - live rough equirect preview (low-res)
+   - post-processing mapping + pixel-average blending into final equirect (downscaled for speed)
+   - progress indicator
+   - store final panorama in IndexedDB
+   - preview via an interactive Three.js sphere controlled by device orientation (no UI controls)
+*/
+
+/* ------------------- Imports ------------------- */
+import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.162.0/build/three.module.js';
+
+/* ------------------- Globals & UI refs ------------------- */
+const tabs = document.querySelectorAll('.tab');
+const editorTab = document.querySelector('.tab[data-tab="editor"]');
+const filesTabEl = document.querySelector('.tab[data-tab="files"]');
+const editor = document.getElementById('editor');
+const files = document.getElementById('files');
+const camVideo = document.getElementById('cam');
+const overlay = document.getElementById('overlay');
+const overlayCtx = overlay.getContext('2d');
+const eqPreviewCanvas = document.getElementById('equirectPreview');
+const eqPreviewCtx = eqPreviewCanvas.getContext('2d');
+const statusEl = document.getElementById('status');
+const manualCaptureBtn = document.getElementById('manualCaptureBtn');
+const autoToggleBtn = document.getElementById('autoToggleBtn');
+const processBtn = document.getElementById('processBtn');
+const progressUI = document.getElementById('progressUI');
+const progressText = document.getElementById('progressText');
+const progressFill = document.getElementById('progressFill');
+const filesList = document.getElementById('filesList');
+const refreshFilesBtn = document.getElementById('refreshFiles');
+
+tabs.forEach(t => t.addEventListener('click', () => {
+  tabs.forEach(x => x.classList.remove('active'));
+  t.classList.add('active');
+  const which = t.dataset.tab;
+  if (which === 'editor') {
+    editor.classList.add('active');
+    files.classList.remove('active');
+  } else {
+    editor.classList.remove('active');
+    files.classList.add('active');
+    refreshFiles();
+  }
+}));
+
+/* ------------------- IndexedDB helper ------------------- */
+const DB_NAME = 'photosphere_db_v1';
+const STORE_NAME = 'panos';
+
+function openDb() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(DB_NAME, 1);
+    req.onupgradeneeded = () => {
+      const db = req.result;
+      if (!db.objectStoreNames.contains(STORE_NAME)) {
+        db.createObjectStore(STORE_NAME, { keyPath: 'id' });
+      }
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function savePanoToDb(id, meta, blob) {
+  const db = await openDb();
+  return new Promise((res, rej) => {
+    const tx = db.transaction(STORE_NAME, 'readwrite');
+    tx.objectStore(STORE_NAME).put({ id, meta, blob, ts: Date.now() });
+    tx.oncomplete = () => res();
+    tx.onerror = () => rej(tx.error);
+  });
+}
+
+async function listPanoramas() {
+  const db = await openDb();
+  return new Promise((res, rej) => {
+    const result = [];
+    const tx = db.transaction(STORE_NAME, 'readonly');
+    const cur = tx.objectStore(STORE_NAME).openCursor();
+    cur.onsuccess = e => {
+      const c = e.target.result;
+      if (c) {
+        result.push(c.value);
+        c.continue();
+      } else res(result);
+    };
+    cur.onerror = () => rej(cur.error);
+  });
+}
+
+async function getPano(id) {
+  const db = await openDb();
+  return new Promise((res, rej) => {
+    const tx = db.transaction(STORE_NAME, 'readonly');
+    const r = tx.objectStore(STORE_NAME).get(id);
+    r.onsuccess = () => res(r.result);
+    r.onerror = () => rej(r.error);
+  });
+}
+
+async function deletePano(id) {
+  const db = await openDb();
+  return new Promise((res, rej) => {
+    const tx = db.transaction(STORE_NAME, 'readwrite');
+    const r = tx.objectStore(STORE_NAME).delete(id);
+    r.onsuccess = () => res();
+    r.onerror = () => rej(r.error);
+  });
+}
+
+/* ------------------- Guide points (26) ------------------- */
+/* We'll build the 3-layer 0/±45 deg grid + exact top/bottom.
+   Total: 3*8 = 24 + top + bottom = 26
+   Produced as objects with yaw (0..360) and pitch (-90..+90)
+*/
+const yawSteps = [0,45,90,135,180,225,270,315];
+const pitchLayers = [45,0,-45]; // topish, horizon, downish
+const guidePoints = [];
+for (let p of pitchLayers) for (let y of yawSteps) guidePoints.push({ yaw: y, pitch: p });
+guidePoints.push({ yaw: 0, pitch: 90 });  // exact top
+guidePoints.push({ yaw: 0, pitch: -90 }); // exact bottom
+// Some derived labels
+guidePoints.forEach((g,i)=> g.name = `P${i+1} (${g.yaw}°,${g.pitch}°)`);
+
+/* ------------------- Capture state ------------------- */
+let captured = []; // {dataUrl, yaw, pitch, w,h}
+let autoCapture = true;
+let tolerance = 10; // degrees tolerance for auto-capture
+let holdMillis = 2000; // hold to auto-capture
+let holdTimer = null;
+
+/* ------------------- Device orientation state ------------------- */
+let deviceYaw = 0, devicePitch = 0, deviceRoll = 0;
+let hasOrientation = false;
+
+async function initDeviceOrientation() {
+  // Request permission on iOS 13+ if needed
+  if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
+    try {
+      const resp = await DeviceOrientationEvent.requestPermission();
+      if (resp !== 'granted') {
+        console.warn('Device orientation permission not granted');
+        statusEl.textContent = 'Orientation permission denied — auto-guide disabled';
+        return;
+      }
+    } catch (e) {
+      console.warn('Orientation permission error', e);
+    }
+  }
+  window.addEventListener('deviceorientation', (ev) => {
+    // alpha: 0..360 (z axis yaw), beta: -180..180 (x axis front-back), gamma: -90..90 (y axis left-right)
+    const alpha = ev.alpha ?? 0;
+    const beta = ev.beta ?? 0;
+    const gamma = ev.gamma ?? 0;
+    // For our purposes, treat yaw = alpha, pitch = beta
+    deviceYaw = (alpha + 360) % 360;
+    // Normalize device pitch to -90..+90
+    devicePitch = Math.max(-90, Math.min(90, beta));
+    deviceRoll = gamma;
+    hasOrientation = true;
+    updateOverlay();
+    maybeAutoCapture();
+  }, true);
+}
+
+/* ------------------- Camera init ------------------- */
+async function initCamera() {
+  statusEl.textContent = 'Requesting camera...';
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: false });
+    camVideo.srcObject = stream;
+    await camVideo.play();
+    statusEl.textContent = 'Camera ready';
+    resizeCanvases();
+    window.addEventListener('resize', resizeCanvases);
+    drawOverlayLoop();
+  } catch (e) {
+    console.error('Camera init failed', e);
+    statusEl.textContent = 'Camera error: ' + (e.message || e);
+  }
+}
+
+/* ------------------- overlay drawing ------------------- */
+function resizeCanvases() {
+  const w = camVideo.videoWidth || camVideo.clientWidth || window.innerWidth;
+  const h = camVideo.videoHeight || camVideo.clientHeight || window.innerHeight;
+  overlay.width = w;
+  overlay.height = h;
+  eqPreviewCanvas.width = Math.round(w/2);   // low-res preview canvas
+  eqPreviewCanvas.height = Math.round(h/2);
+}
+function drawOverlayLoop() {
+  if (camVideo.readyState >= 2) resizeCanvases();
+  updateOverlay();
+  requestAnimationFrame(drawOverlayLoop);
+}
+function updateOverlay() {
+  const w = overlay.width, h = overlay.height;
+  overlayCtx.clearRect(0,0,w,h);
+  // Draw semi-transparent guide map circle
+  overlayCtx.save();
+  overlayCtx.globalAlpha = 0.6;
+  overlayCtx.fillStyle = '#0008';
+  overlayCtx.fillRect(0,0,w,h);
+  overlayCtx.restore();
+
+  // Convert yaw/pitch to screen-space for guide marker
+  // We'll map yaw -> horizontal, pitch -> vertical (simple equirect layout)
+  for (let i=0;i<guidePoints.length;i++) {
+    const gp = guidePoints[i];
+    const u = (gp.yaw % 360) / 360; // 0..1
+    const v = 1 - ((gp.pitch + 90) / 180); // 0..1 top->bottom
+    const x = Math.round(u * w);
+    const y = Math.round(v * h);
+    // marker color
+    const done = i < captured.length;
+    overlayCtx.beginPath();
+    overlayCtx.arc(x, y, done ? 12 : 10, 0, Math.PI*2);
+    overlayCtx.fillStyle = done ? '#1ed760' : '#ff4d4d';
+    overlayCtx.fill();
+    overlayCtx.font = '12px system-ui';
+    overlayCtx.fillStyle = '#fff';
+    overlayCtx.fillText(done ? '✓' : (i+1), x + 14, y + 5);
+  }
+
+  // show current yaw/pitch at center top
+  overlayCtx.fillStyle = 'rgba(0,0,0,0.5)';
+  overlayCtx.fillRect(8,8,220,40);
+  overlayCtx.fillStyle = '#fff';
+  overlayCtx.font = '13px system-ui';
+  overlayCtx.fillText(`Yaw: ${deviceYaw.toFixed(1)}°  Pitch: ${devicePitch.toFixed(1)}°`, 16, 30);
+
+  // show highlight for target
+  const targetIdx = Math.min(captured.length, guidePoints.length-1);
+  if (targetIdx < guidePoints.length) {
+    const gp = guidePoints[targetIdx];
+    const u = (gp.yaw % 360) / 360;
+    const v = 1 - ((gp.pitch + 90) / 180);
+    const x = Math.round(u * w), y = Math.round(v * h);
+    overlayCtx.strokeStyle = 'rgba(255,255,255,0.9)';
+    overlayCtx.lineWidth = 2;
+    overlayCtx.beginPath();
+    overlayCtx.arc(x, y, 22, 0, Math.PI*2);
+    overlayCtx.stroke();
+    // show tolerance ring based on tolerance degrees mapped roughly to pixels
+    const pxYaw = (tolerance/360) * w;
+    const pxPitch = (tolerance/180) * h;
+    const rad = Math.max(pxYaw, pxPitch) * 1.2;
+    overlayCtx.strokeStyle = 'rgba(30,215,96,0.6)';
+    overlayCtx.lineWidth = 2;
+    overlayCtx.beginPath();
+    overlayCtx.arc(x, y, rad, 0, Math.PI*2);
+    overlayCtx.stroke();
+  }
+
+  // Draw small live preview at top-right with thumbnails of captured
+  const thumbW = 76, thumbH = 56;
+  for (let i=0;i<captured.length;i++) {
+    const cx = overlay.width - (i+1)*(thumbW+8) - 8;
+    const cy = 12;
+    const img = new Image(); img.src = captured[i].dataUrl;
+    overlayCtx.drawImage(img, cx, cy, thumbW, thumbH);
+  }
+}
+
+/* ------------------- device orientation & auto-capture ------------------- */
+let lastAutoCheck = 0;
+function maybeAutoCapture() {
+  if (!autoCapture) return;
+  if (!hasOrientation) return;
+  const idx = Math.min(captured.length, guidePoints.length - 1);
+  const target = guidePoints[idx];
+  const yawDiff = angleDiff(deviceYaw, target.yaw);
+  const pitchDiff = Math.abs(devicePitch - target.pitch);
+  const inside = (yawDiff <= tolerance) && (pitchDiff <= tolerance);
+  if (inside) {
+    if (!holdTimer) {
+      statusEl.textContent = `Aligned — hold ${Math.round(holdMillis/1000)}s to capture`;
+      holdTimer = setTimeout(()=> {
+        captureCurrent(target);
+        holdTimer = null;
+      }, holdMillis);
+    }
+  } else {
+    // cancel timer if moved out
+    if (holdTimer) { clearTimeout(holdTimer); holdTimer = null; statusEl.textContent = ''; }
+  }
+  lastAutoCheck = Date.now();
+}
+function angleDiff(a,b){
+  let d = Math.abs(((a - b + 180) % 360 + 360) % 360 - 180);
+  return d;
+}
+
+/* ------------------- capture functions ------------------- */
+function captureCurrent(targetOverride=null) {
+  if (camVideo.readyState < 2) return;
+  const canvas = document.createElement('canvas');
+  // capture at full video resolution but we'll downscale later for processing
+  canvas.width = camVideo.videoWidth || 1280;
+  canvas.height = camVideo.videoHeight || 720;
+  const cctx = canvas.getContext('2d');
+  cctx.drawImage(camVideo, 0,0, canvas.width, canvas.height);
+  const dataUrl = canvas.toDataURL('image/jpeg', 0.92);
+  const idx = captured.length;
+  const gp = targetOverride ?? guidePoints[Math.min(idx, guidePoints.length-1)];
+  captured.push({ dataUrl, yaw: gp.yaw, pitch: gp.pitch, w: canvas.width, h: canvas.height });
+  statusEl.textContent = `Captured ${captured.length}/${guidePoints.length}`;
+  updateEquirectPreview(); // rough live preview
+}
+
+manualCaptureBtn.addEventListener('click', ()=> captureCurrent());
+
+autoToggleBtn.addEventListener('click', ()=>{
+  autoCapture = !autoCapture;
+  autoToggleBtn.textContent = autoCapture ? 'Auto: ON' : 'Auto: OFF';
+  autoToggleBtn.classList.toggle('secondary', !autoCapture);
+  if (!autoCapture && holdTimer) { clearTimeout(holdTimer); holdTimer = null; }
+});
+
+/* ------------------- Rough live equirect preview ------------------- */
+/* We'll map downscaled captured images approximately into an equirect canvas
+   by placing each image rectangle centered at the target lon/lat position and sized
+   according to assumed camera FOV. This gives a quick sense of coverage.
+*/
+function updateEquirectPreview() {
+  const W = eqPreviewCanvas.width;
+  const H = eqPreviewCanvas.height;
+  eqPreviewCtx.clearRect(0,0,W,H);
+  eqPreviewCtx.fillStyle = '#0b0b0b';
+  eqPreviewCtx.fillRect(0,0,W,H);
+  // basic coverage: for each captured, draw its downscaled version centered at (u,v)
+  const assumedFOV = 60 * Math.PI/180; // 60 degrees horizontal FOV assumption
+  for (let i=0;i<captured.length;i++){
+    const c = captured[i];
+    const img = new Image();
+    img.src = c.dataUrl;
+    // draw onload synchronously via closure
+    (function(img, c){
+      img.onload = () => {
+        const imgW = Math.round(W * 0.5); // scale down
+        const imgH = Math.round(imgW * (img.height/img.width));
+        const u = (c.yaw % 360)/360;
+        const v = 1 - ((c.pitch + 90)/180);
+        let x = Math.round(u * W - imgW/2);
+        let y = Math.round(v * H - imgH/2);
+        // wrap horizontally
+        if (x + imgW < 0) x += W;
+        if (x > W) x -= W;
+        eqPreviewCtx.globalAlpha = 0.9;
+        eqPreviewCtx.drawImage(img, x, y, imgW, imgH);
+        eqPreviewCtx.globalAlpha = 1;
+      };
+    })(img,c);
+  }
+}
+
+/* ------------------- Processing / full stitching ------------------- */
+/*
+ Approach:
+ - Create final equirect canvas with size outW x outH (e.g., 2048x1024)
+ - For speed, downscale each source image to small size (e.g., 512 width) before mapping
+ - For each source downscaled image:
+    - For each pixel (sx,sy) compute direction vector in camera coords using pinhole model
+    - Rotate vector by (yaw,pitch) of capture (treated as yaw around Y, pitch around X)
+    - Convert vector to spherical coords (lon, lat) and map to equirect (u,v)
+    - Map (u,v) to integer px,py in final canvas and accumulate rgb sums and count per final pixel
+ - After processing all source pixels, compute average for each final pixel from accumulated sums
+ - Write ImageData to final canvas and build a Blob for saving / viewing.
+ - All loops are done in small chunks (using await/chunk) to keep UI responsive; progress is updated.
+*/
+
+function setProgress(percent, text='Processing...'){
+  progressUI.style.display = percent>=0 && percent<100 ? 'flex' : 'none';
+  progressText.textContent = text;
+  progressFill.style.width = `${Math.round(percent)}%`;
+}
+
+// utility: load image into canvas and downscale to maxWidth
+async function loadImageToCanvas(dataUrl, maxWidth) {
+  return new Promise((res,rej)=>{
+    const img = new Image();
+    img.onload = ()=>{
+      const scale = Math.min(1, maxWidth / img.width);
+      const cw = Math.max(4, Math.round(img.width * scale));
+      const ch = Math.max(4, Math.round(img.height * scale));
+      const c = document.createElement('canvas');
+      c.width = cw; c.height = ch;
+      const ctx = c.getContext('2d');
+      ctx.drawImage(img, 0,0, cw, ch);
+      res({canvas:c, ctx, w:cw, h:ch});
+    };
+    img.onerror = rej;
+    img.src = dataUrl;
+  });
+}
+
+// rotate a direction vector by yaw (deg) around Y and pitch (deg) around X
+function rotateDir(vec, yawDeg, pitchDeg){
+  // yaw: rotate around Y (up), positive yaw rotates rightwards (towards +X)
+  const yaw = yawDeg * Math.PI/180;
+  const pitch = pitchDeg * Math.PI/180;
+  // apply pitch (X axis) then yaw (Y axis)
+  // start with vec [x,y,z]
+  // rotate X by pitch:
+  let x = vec[0], y = vec[1], z = vec[2];
+  // rotate around X:
+  let cosP = Math.cos(pitch), sinP = Math.sin(pitch);
+  let y2 = y * cosP - z * sinP;
+  let z2 = y * sinP + z * cosP;
+  // rotate around Y:
+  let cosY = Math.cos(yaw), sinY = Math.sin(yaw);
+  let x3 = x * cosY + z2 * sinY;
+  let z3 = -x * sinY + z2 * cosY;
+  return [x3, y2, z3];
+}
+
+// given pixel coords sx,sy in source canvas sized sw x sh and camera horizontal fov fovH (radians)
+// return direction vector in camera coordinates (forward along +Z)
+function pixelToDir(sx, sy, sw, sh, fovH){
+  // assume principal point at center, focal length f = (sw/2) / tan(fovH/2)
+  const cx = sw/2, cy = sh/2;
+  const f = (sw/2) / Math.tan(fovH/2);
+  // pixel coords -> camera coords: x to right, y up, z forward
+  // Note: canvas y increases downward so invert
+  const x = (sx - cx);
+  const y = (cy - sy);
+  const z = f;
+  // normalize
+  const len = Math.sqrt(x*x + y*y + z*z);
+  return [x/len, y/len, z/len];
+}
+
+// main stitching routine
+async function stitchCaptured({ outW=2048, outH=1024, srcMaxWidth=512, fovDeg=60 }) {
+  if (captured.length === 0) throw new Error('No captures to stitch');
+
+  setProgress(0, 'Preparing images...');
+  // downscale sources
+  const sources = [];
+  for (let i=0;i<captured.length;i++){
+    const c = captured[i];
+    const loaded = await loadImageToCanvas(c.dataUrl, srcMaxWidth);
+    sources.push({ canvas: loaded.canvas, w: loaded.w, h: loaded.h, yaw: c.yaw, pitch: c.pitch });
+  }
+
+  // prepare accumulators
+  const outW0 = outW, outH0 = outH;
+  const accumR = new Float32Array(outW0 * outH0);
+  const accumG = new Float32Array(outW0 * outH0);
+  const accumB = new Float32Array(outW0 * outH0);
+  const counts = new Uint16Array(outW0 * outH0);
+
+  const fov = fovDeg * Math.PI/180;
+  // chunk processing per source image to keep UI responsive
+  let totalPixels = 0;
+  for (let s of sources) totalPixels += s.w * s.h;
+  let processedPixels = 0;
+
+  for (let si=0; si<sources.length; si++){
+    const s = sources[si];
+    const sdata = s.canvas.getContext('2d').getImageData(0,0,s.w,s.h).data;
+    // iterate pixels, but step by 'step' for speed on mobile; step=1 for max quality
+    const step = Math.max(1, Math.floor(Math.max(1, (s.w*s.h) / 200000))); // aim ~200k pixels per source
+    for (let y=0;y<s.h;y+=step){
+      // chunk yield control every few lines
+      await new Promise(r => setTimeout(r,0));
+      for (let x=0;x<s.w;x+=step){
+        const idx = (y*s.w + x) * 4;
+        const r = sdata[idx], g = sdata[idx+1], b = sdata[idx+2], a = sdata[idx+3];
+        if (a < 10) { processedPixels += step; continue; }
+        // compute camera direction
+        const dir = pixelToDir(x, y, s.w, s.h, fov);
+        // rotate by yaw/pitch of source
+        const world = rotateDir(dir, s.yaw, s.pitch);
+        // convert to spherical coords: lon, lat
+        const vx = world[0], vy = world[1], vz = world[2];
+        const lon = Math.atan2(vx, vz); // range -PI..PI
+        const lat = Math.asin(Math.max(-1, Math.min(1, vy))); // -PI/2..PI/2
+        // map to u,v
+        let u = (lon + Math.PI) / (2*Math.PI); // 0..1
+        let v = 1 - (lat + Math.PI/2) / Math.PI; // 0..1
+        // convert to pixel
+        let px = Math.floor(u * outW0);
+        let py = Math.floor(v * outH0);
+        // handle wrap
+        if (px < 0) px += outW0;
+        if (px >= outW0) px -= outW0;
+        if (py < 0 || py >= outH0) { processedPixels += step; continue; }
+        const outIdx = py * outW0 + px;
+        accumR[outIdx] += r;
+        accumG[outIdx] += g;
+        accumB[outIdx] += b;
+        counts[outIdx] ++;
+        processedPixels += step;
+      }
+      // update progress
+      const pct = Math.min(99, (processedPixels/totalPixels)*100);
+      setProgress(pct, `Mapping images... ${Math.round(pct)}%`);
+    }
+  }
+
+  // finalize image: average accumulators
+  setProgress(99, 'Composing final image...');
+  const outCanvas = document.createElement('canvas');
+  outCanvas.width = outW0; outCanvas.height = outH0;
+  const outCtx = outCanvas.getContext('2d');
+  const outImg = outCtx.createImageData(outW0, outH0);
+  const total = outW0 * outH0;
+  // chunked composition
+  const batch = 10000;
+  for (let i=0;i<total;i+=batch) {
+    const limit = Math.min(i+batch, total);
+    for (let j=i;j<limit;j++){
+      const cCount = counts[j];
+      const idx4 = j*4;
+      if (cCount === 0) {
+        outImg.data[idx4] = 0;
+        outImg.data[idx4+1] = 0;
+        outImg.data[idx4+2] = 0;
+        outImg.data[idx4+3] = 255;
+      } else {
+        outImg.data[idx4] = Math.round(accumR[j] / cCount);
+        outImg.data[idx4+1] = Math.round(accumG[j] / cCount);
+        outImg.data[idx4+2] = Math.round(accumB[j] / cCount);
+        outImg.data[idx4+3] = 255;
+      }
+    }
+    // yield to UI
+    await new Promise(r => setTimeout(r, 0));
+    const pct = 99 + Math.round((i/total)*1); // small incremental
+    setProgress(Math.min(99, pct), 'Composing...');
+  }
+  outCtx.putImageData(outImg, 0, 0);
+  setProgress(100, 'Finalizing...');
+  // create blob
+  const blob = await new Promise(res => outCanvas.toBlob(res, 'image/jpeg', 0.92));
+  return { canvas: outCanvas, blob };
+}
+
+/* ------------------- UI: Process button ------------------- */
+processBtn.addEventListener('click', async ()=>{
+  if (captured.length === 0) { alert('No captures'); return; }
+  try {
+    progressUI.style.display = 'flex';
+    setProgress(0, 'Starting...');
+    // For speed on mobile, choose smaller output depending on device
+    const preferW = Math.min(4096, Math.max(2048, Math.round((window.innerWidth || 800)*3)));
+    const result = await stitchCaptured({ outW: 2048, outH: 1024, srcMaxWidth: 640, fovDeg: 60 });
+    // Save to IndexedDB with metadata
+    const id = 'pano_'+Date.now();
+    await savePanoToDb(id, { sourceCount: captured.length, width: result.canvas.width, height: result.canvas.height }, result.blob);
+    setProgress(100, 'Saved');
+    // reset captured set (so user can capture fresh)
+    captured = [];
+    updateEquirectPreview();
+    alert('Panorama processed & saved to files');
+  } catch (e) {
+    console.error('stitch error', e);
+    alert('Processing error: ' + e.message);
+  } finally {
+    setTimeout(()=> { progressUI.style.display = 'none'; setProgress(0,''); }, 800);
+  }
+});
+
+/* ------------------- Files UI ------------------- */
+async function refreshFiles() {
+  filesList.innerHTML = '<div class="small" style="padding:12px">Loading...</div>';
+  try {
+    const list = await listPanoramas();
+    filesList.innerHTML = '';
+    if (list.length === 0) filesList.innerHTML = '<div class="small" style="padding:12px">No panoramas stored</div>';
+    for (let entry of list.reverse()) {
+      const row = document.createElement('div');
+      row.className = 'fileRow';
+      const imgEl = document.createElement('img');
+      imgEl.className = 'thumb';
+      // create object URL
+      const url = URL.createObjectURL(entry.blob);
+      imgEl.src = url;
+      const meta = document.createElement('div');
+      meta.innerHTML = `<div style="font-weight:600">${entry.id}</div><div class="small">Saved: ${new Date(entry.ts).toLocaleString()}</div>`;
+      const actions = document.createElement('div');
+      actions.className = 'fileActions';
+      const btnOpen = document.createElement('button'); btnOpen.textContent = 'Open';
+      btnOpen.onclick = async () => { await openPanoInViewer(entry); };
+      const btnDl = document.createElement('button'); btnDl.textContent = 'Download';
+      btnDl.onclick = () => {
+        const a = document.createElement('a'); a.href = url; a.download = entry.id + '.jpg'; a.click();
+      };
+      const btnDel = document.createElement('button'); btnDel.textContent = 'Delete';
+      btnDel.onclick = async () => { if (confirm('Delete?')) { await deletePano(entry.id); refreshFiles(); } };
+      actions.append(btnOpen, btnDl, btnDel);
+      row.append(imgEl, meta, actions);
+      filesList.appendChild(row);
+    }
+  } catch (e) {
+    filesList.innerHTML = '<div class="small" style="padding:12px">Error loading files</div>';
+    console.error(e);
+  }
+}
+refreshFilesBtn.addEventListener('click', refreshFiles);
+async function refreshFiles(){ await refreshFiles(); } // placeholder overload
+
+/* open panorama into the main editor viewer in VR-style using Three.js + device orientation */
+let threeRenderer, threeScene, threeCamera, threeSphere;
+async function openPanoInViewer(entry) {
+  // build three.js viewer overlay in full editor
+  // create objectURL for blob
+  const url = URL.createObjectURL(entry.blob);
+  // initialize three if necessary
+  if (!threeRenderer) {
+    // replace eqPreviewCanvas with a WebGL canvas to render panorama with orientation control
+    threeRenderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, canvas: eqPreviewCanvas });
+    threeRenderer.setSize(window.innerWidth, window.innerHeight);
+    threeScene = new THREE.Scene();
+    threeCamera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
+    threeCamera.position.set(0,0,0.1);
+    // orientation listener
+    window.addEventListener('deviceorientation', (e)=>{
+      if (!threeCamera) return;
+      const alpha = THREE.MathUtils.degToRad(e.alpha || 0);
+      const beta = THREE.MathUtils.degToRad(e.beta || 0);
+      const gamma = THREE.MathUtils.degToRad(e.gamma || 0);
+      const euler = new THREE.Euler(beta, alpha, -gamma, 'YXZ');
+      threeCamera.quaternion.setFromEuler(euler);
+    }, true);
+    // animation loop
+    (function animate(){
+      requestAnimationFrame(animate);
+      if (threeRenderer && threeScene && threeCamera) threeRenderer.render(threeScene, threeCamera);
+    })();
+  }
+  // remove previous sphere
+  if (threeSphere) { threeScene.remove(threeSphere); threeSphere.geometry.dispose(); threeSphere.material.dispose(); threeSphere = null; }
+  // create sphere with texture
+  const tex = new THREE.TextureLoader().load(url, ()=>{ /* texture loaded */ });
+  const sphereGeo = new THREE.SphereGeometry(5, 64, 64);
+  sphereGeo.scale(-1,1,1);
+  const mat = new THREE.MeshBasicMaterial({ map: tex });
+  threeSphere = new THREE.Mesh(sphereGeo, mat);
+  threeScene.add(threeSphere);
+  // switch to editor tab to show viewer
+  tabs.forEach(t => t.classList.remove('active'));
+  document.querySelector('.tab[data-tab="editor"]').classList.add('active');
+  editor.classList.add('active');
+  files.classList.remove('active');
+}
+
+/* ------------------- startup ------------------- */
+(async function startup(){
+  await initDeviceOrientation();
+  await initCamera();
+  statusEl.textContent = 'Ready — follow guide and capture';
+  // small tip for orientation
+  setTimeout(()=> statusEl.textContent = 'Tip: move phone to align guide marker; auto-capture will trigger when aligned', 1500);
+})();
+
+/* ------------------- small helper to ensure refreshFiles variable not ambiguous ------------------- */
+async function refreshFiles() {
+  try { await (async () => {
+    filesList.innerHTML = '<div class="small" style="padding:12px">Loading...</div>';
+    const list = await listPanoramas();
+    filesList.innerHTML = '';
+    if (list.length === 0) filesList.innerHTML = '<div class="small" style="padding:12px">No panoramas stored</div>';
+    for (let entry of list.reverse()) {
+      const row = document.createElement('div'); row.className = 'fileRow';
+      const imgEl = document.createElement('img'); imgEl.className = 'thumb';
+      const url = URL.createObjectURL(entry.blob); imgEl.src = url;
+      const meta = document.createElement('div'); meta.innerHTML = `<div style="font-weight:600">${entry.id}</div><div class="small">Saved: ${new Date(entry.ts).toLocaleString()}</div>`;
+      const actions = document.createElement('div'); actions.className='fileActions';
+      const btnOpen = document.createElement('button'); btnOpen.textContent='Open'; btnOpen.onclick=()=>openPanoInViewer(entry);
+      const btnDl = document.createElement('button'); btnDl.textContent='Download'; btnDl.onclick=()=>{ const a=document.createElement('a'); a.href=url; a.download=entry.id+'.jpg'; a.click(); };
+      const btnDel = document.createElement('button'); btnDel.textContent='Delete'; btnDel.onclick=async()=>{ if(confirm('Delete?')){ await deletePano(entry.id); refreshFiles(); } };
+      actions.append(btnOpen, btnDl, btnDel);
+      row.append(imgEl, meta, actions);
+      filesList.appendChild(row);
+    }
+  })(); } catch(e){ console.error(e); filesList.innerHTML = '<div class="small" style="padding:12px">Error</div>'; }
+}
+
+</script>
+</body>
+</html>
