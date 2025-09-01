@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Photosphere Capture</title>
+<style>
+body, html {margin:0; padding:0; overflow:hidden; background:#000; color:#fff;}
+#ui {position:absolute; top:0; left:0; width:100%; height:100%; pointer-events:none;}
+#target {position:absolute; width:40px; height:40px; border:3px solid #0f0; border-radius:50%; transform:translate(-50%,-50%);}
+#captured {position:absolute; width:100%; height:100%; pointer-events:none;}
+.dot {position:absolute; width:12px; height:12px; border-radius:50%; background:#f00; transform:translate(-50%,-50%);}
+#guidance {position:absolute; bottom:10px; left:50%; transform:translateX(-50%); font-size:18px; color:#0f0;}
+#buttons {position:absolute; top:10px; left:50%; transform:translateX(-50%); pointer-events:auto;}
+#buttons button {margin:0 5px; padding:10px; font-size:16px;}
+canvas {display:none;}
+</style>
+</head>
+<body>
+<video id="camera" autoplay playsinline style="width:100%; height:100%; object-fit:cover;"></video>
+<div id="ui">
+  <div id="captured"></div>
+  <div id="target"></div>
+  <div id="guidance"></div>
+  <div id="buttons">
+    <button id="capture">Capture</button>
+    <button id="process">Process & Save Sphere</button>
+    <button id="view">View Saved Spheres</button>
+  </div>
+</div>
+<canvas id="canvas"></canvas>
+<script>
+const video = document.getElementById('camera');
+const target = document.getElementById('target');
+const capturedDiv = document.getElementById('captured');
+const guidance = document.getElementById('guidance');
+const captureBtn = document.getElementById('capture');
+const processBtn = document.getElementById('process');
+const viewBtn = document.getElementById('view');
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+
+let db;
+const points = [];
+const captures = [];
+const capturedDots = [];
+
+// Generate points: yaw every 45°, pitch -45,0,45
+for(let pitch of [-45,0,45]){
+  for(let yaw=0; yaw<360; yaw+=45){
+    points.push({yaw,pitch,captured:false});
+  }
+}
+
+let orientation = {alpha:0,beta:0,gamma:0};
+let currentIndex = 0;
+
+async function initCamera(){
+  try{
+    const stream = await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment'}});
+    video.srcObject = stream;
+  }catch(e){alert('Camera init failed: '+e);}
+}
+
+function rotateToScreen(yaw,pitch){
+  const centerX = window.innerWidth/2;
+  const centerY = window.innerHeight/2;
+  const maxOffset = Math.min(centerX,centerY)*0.8;
+  // Auto-correct target so phone stays upright
+  const dx = Math.sin((yaw-orientation.alpha)*Math.PI/180)*maxOffset;
+  const dy = -Math.sin((pitch-orientation.beta)*Math.PI/180)*maxOffset;
+  return {x:centerX+dx,y:centerY+dy};
+}
+
+function updateTarget(){
+  // find next uncaptured point
+  currentIndex = points.findIndex(p=>!p.captured);
+  if(currentIndex==-1){
+    target.style.display='none';
+    guidance.textContent='All points captured';
+    return;
+  }
+  const p = points[currentIndex];
+  const pos = rotateToScreen(p.yaw,p.pitch);
+  target.style.left = pos.x+'px';
+  target.style.top = pos.y+'px';
+
+  const distX = pos.x - window.innerWidth/2;
+  const distY = pos.y - window.innerHeight/2;
+  const tol = 40;
+  let hint = '';
+  if(Math.abs(distY)>tol) hint += distY>0?'Move Down ':'Move Up ';
+  if(Math.abs(distX)>tol) hint += distX>0?'Move Right ':'Move Left ';
+  if(hint==='') hint='Aligned';
+  guidance.textContent = hint;
+}
+
+window.addEventListener('deviceorientation', e=>{
+  orientation.alpha = e.alpha||0;
+  orientation.beta = e.beta||0;
+  orientation.gamma = e.gamma||0;
+  updateTarget();
+});
+
+captureBtn.addEventListener('click', ()=>{
+  if(currentIndex==-1) return;
+  canvas.width = video.videoWidth;
+  canvas.height = video.videoHeight;
+  ctx.drawImage(video,0,0,canvas.width,canvas.height);
+  const imgData = canvas.toDataURL('image/jpeg',0.8);
+  captures.push({imageData:imgData, point:points[currentIndex]});
+  points[currentIndex].captured = true;
+  // mark captured point
+  const dot = document.createElement('div');
+  dot.className='dot';
+  const pos = rotateToScreen(points[currentIndex].yaw, points[currentIndex].pitch);
+  dot.style.left = pos.x+'px';
+  dot.style.top = pos.y+'px';
+  capturedDiv.appendChild(dot);
+  capturedDots.push(dot);
+  updateTarget();
+});
+
+async function initDB(){
+  db = await new Promise((resolve,reject)=>{
+    const r = indexedDB.open('photosphereDB',1);
+    r.onupgradeneeded = e=>{
+      e.target.result.createObjectStore('spheres',{autoIncrement:true});
+    };
+    r.onsuccess = e=>resolve(e.target.result);
+    r.onerror = e=>reject(e);
+  });
+}
+
+processBtn.addEventListener('click', async ()=>{
+  if(captures.length===0){alert('No captures'); return;}
+  guidance.textContent='Processing...';
+  const w=1024,h=512;
+  const outCanvas = document.createElement('canvas');
+  outCanvas.width=w; outCanvas.height=h;
+  const outCtx = outCanvas.getContext('2d');
+  for(let c of captures){
+    const img = new Image();
+    img.src = c.imageData;
+    await new Promise(r=>img.onload=r);
+    outCtx.globalAlpha = 1/captures.length;
+    outCtx.drawImage(img,0,0,w,h);
+  }
+  const tx = db.transaction('spheres','readwrite');
+  tx.objectStore('spheres').add(outCanvas.toDataURL('image/jpeg',0.9));
+  tx.oncomplete = ()=>{
+    guidance.textContent='Sphere saved!';
+    captures.length=0;
+    points.forEach(p=>p.captured=false);
+    capturedDots.forEach(d=>d.remove());
+    capturedDots.length=0;
+    updateTarget();
+  };
+});
+
+viewBtn.addEventListener('click', async ()=>{
+  const tx = db.transaction('spheres','readonly');
+  const store = tx.objectStore('spheres');
+  const all = [];
+  store.openCursor().onsuccess = e=>{
+    const cursor = e.target.result;
+    if(cursor){all.push(cursor.value); cursor.continue();}
+    else{
+      if(all.length===0){alert('No saved spheres'); return;}
+      const viewer = window.open('','Sphere Viewer','width=400,height=300');
+      viewer.document.write('<body style="margin:0;background:black;"><canvas id="v" style="width:100%;height:100%;"></canvas></body>');
+      const vCanvas = viewer.document.getElementById('v');
+      const vCtx = vCanvas.getContext('2d');
+      let alpha=0;
+      const img = new Image();
+      img.src = all[all.length-1];
+      img.onload = ()=>{
+        vCanvas.width=img.width; vCanvas.height=img.height;
+        function draw(){
+          const xOffset=((alpha%360)/360)*img.width;
+          vCtx.clearRect(0,0,vCanvas.width,vCanvas.height);
+          vCtx.drawImage(img,xOffset,0,vCanvas.width,vCanvas.height,0,0,vCanvas.width,vCanvas.height);
+          requestAnimationFrame(draw);
+        }
+        draw();
+      };
+      viewer.addEventListener('deviceorientation',e=>{alpha=e.alpha||0;});
+    }
+  };
+});
+
+initCamera();
+initDB();
+updateTarget();
+</script>
+</body>
+</html>
