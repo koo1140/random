@@ -1,0 +1,298 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Photosphere — Camera Fixed (Android)</title>
+<style>
+  html,body{height:100%;margin:0;font-family:Inter,system-ui,Roboto,Arial;background:#070708;color:#fff}
+  #container{display:flex;flex-direction:column;height:100%}
+  header{padding:10px;background:#0d0d0f;border-bottom:1px solid #111;display:flex;align-items:center;gap:12px}
+  header h1{font-size:16px;margin:0}
+  #main{flex:1;display:flex;gap:12px;padding:12px}
+  #left{flex:1;display:flex;flex-direction:column;gap:10px}
+  #videoWrap{position:relative;flex:1;background:#000;border-radius:8px;overflow:hidden}
+  video{width:100%;height:100%;object-fit:cover;display:block}
+  canvas{position:absolute;left:0;top:0;pointer-events:none}
+  #controls{display:flex;gap:8px;align-items:center}
+  select,input,button{padding:8px;border-radius:8px;border:0;background:#121214;color:#fff}
+  button.primary{background:#1ed760;color:#000;font-weight:700}
+  #status{padding:8px;background:#0b0b0d;border-radius:8px;color:#cfcfcf}
+  #log{white-space:pre-wrap;font-family:monospace;background:#060607;padding:8px;border-radius:6px;max-height:180px;overflow:auto}
+  #files{width:360px;max-width:40%;display:flex;flex-direction:column;gap:8px}
+  .fileItem{background:#0b0b0c;padding:8px;border-radius:8px;display:flex;gap:8px;align-items:center}
+  .thumb{width:100px;height:60px;background:#111;object-fit:cover;border-radius:6px}
+  .small{font-size:12px;color:#9aa}
+</style>
+</head>
+<body>
+<div id="container">
+  <header>
+    <h1>Photosphere — Camera Fix (Android)</h1>
+    <div class="small">Make sure site is served over HTTPS or opened via http://localhost</div>
+  </header>
+
+  <div id="main">
+    <div id="left">
+      <div id="controls">
+        <label for="cameraSelect">Camera:</label>
+        <select id="cameraSelect"><option>enumerating...</option></select>
+        <button id="startBtn" class="primary">Start camera</button>
+        <button id="stopBtn">Stop</button>
+        <label style="margin-left:auto" class="small">Auto-capture: <input id="autoChk" type="checkbox" checked/></label>
+      </div>
+
+      <div id="videoWrap">
+        <video id="video" autoplay playsinline muted></video>
+        <canvas id="overlay"></canvas>
+      </div>
+
+      <div id="status">Status: idle</div>
+      <div id="log">Console log will appear here</div>
+    </div>
+
+    <div id="files">
+      <div style="font-weight:700">Saved panoramas</div>
+      <div id="filesList"></div>
+    </div>
+  </div>
+</div>
+
+<script type="module">
+/*
+  Robust camera initialization for Android
+  - enumerates cameras and populates selector
+  - start button uses deviceId if available (most reliable)
+  - waits for loadedmetadata and videoWidth>0 with retries
+  - clear, descriptive error messages and logs
+  - once camera is running, initializes overlay & tiny demo hooks (you can plug full app logic here)
+*/
+
+const video = document.getElementById('video');
+const overlay = document.getElementById('overlay');
+const overlayCtx = overlay.getContext('2d');
+const cameraSelect = document.getElementById('cameraSelect');
+const startBtn = document.getElementById('startBtn');
+const stopBtn = document.getElementById('stopBtn');
+const statusEl = document.getElementById('status');
+const logEl = document.getElementById('log');
+const autoChk = document.getElementById('autoChk');
+
+let currentStream = null;
+let devices = [];
+let videoTrack = null;
+
+// tiny file list UI using IndexedDB (keeps previous pattern)
+const DB_NAME = 'photosphere_test_db';
+const STORE = 'panos';
+function openDb(){ return new Promise((res,rej)=>{ const r=indexedDB.open(DB_NAME,1); r.onupgradeneeded=()=>{ const db=r.result; if(!db.objectStoreNames.contains(STORE)) db.createObjectStore(STORE,{keyPath:'id'}); }; r.onsuccess=()=>res(r.result); r.onerror=()=>rej(r.error); }); }
+async function listFiles(){ const db = await openDb(); return new Promise((res,rej)=>{ const tx = db.transaction(STORE,'readonly'); const out=[]; const c = tx.objectStore(STORE).openCursor(); c.onsuccess = e => { const cur = e.target.result; if(cur){ out.push(cur.value); cur.continue(); } else res(out); }; c.onerror = ()=> rej(c.error); }); }
+async function saveFile(id, blob){ const db = await openDb(); return new Promise((res,rej)=>{ const tx = db.transaction(STORE,'readwrite'); tx.objectStore(STORE).put({id, blob, ts: Date.now()}); tx.oncomplete = ()=> res(); tx.onerror = ()=> rej(tx.error); }); }
+
+function log(...args){
+  console.log(...args);
+  const s = args.map(a=> (typeof a==='object'? JSON.stringify(a): String(a))).join(' ');
+  logEl.textContent += '\\n' + s;
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
+// enumerate video input devices
+async function enumerateCameras(){
+  log('Enumerating devices...');
+  try {
+    const all = await navigator.mediaDevices.enumerateDevices();
+    devices = all.filter(d=> d.kind === 'videoinput');
+    cameraSelect.innerHTML = '';
+    if (devices.length === 0) {
+      const opt = document.createElement('option'); opt.text = 'No camera found'; cameraSelect.add(opt);
+      statusEl.textContent = 'Status: No cameras found on this device';
+      log('No videoinput devices available');
+      return;
+    }
+    // prefer devices whose label contains 'back' or 'rear'
+    // if labels are empty (no permission yet), show generic list; after permission they will fill
+    devices.forEach((d, idx) => {
+      const opt = document.createElement('option');
+      opt.value = d.deviceId;
+      opt.text = d.label || `Camera ${idx+1}`;
+      cameraSelect.add(opt);
+    });
+    // try to auto-select a 'back' camera if label known
+    const backIdx = devices.findIndex(d=> /back|rear|environment/i.test(d.label));
+    if (backIdx >= 0) cameraSelect.selectedIndex = backIdx;
+    statusEl.textContent = `Status: ${devices.length} camera(s) found`;
+    log('Devices:', devices);
+  } catch (e) {
+    log('enumerateDevices error', e);
+    statusEl.textContent = 'Status: Unable to enumerate devices — permission or secure origin issue';
+  }
+}
+
+// start camera using deviceId (preferred) or facingMode fallback
+async function startCamera() {
+  stopCamera(); // clean previous
+  const selectedDeviceId = cameraSelect.value;
+  log('Starting camera using deviceId:', selectedDeviceId);
+  statusEl.textContent = 'Status: Requesting camera...';
+  try {
+    // choose constraints: deviceId if available
+    const constraints = selectedDeviceId ? { video: { deviceId: { exact: selectedDeviceId } } } : { video: { facingMode: { ideal: 'environment' } } };
+    currentStream = await navigator.mediaDevices.getUserMedia(constraints);
+    // set to video element
+    video.srcObject = currentStream;
+    // grab track for possible constraints
+    videoTrack = currentStream.getVideoTracks()[0];
+    // wait for metadata
+    await new Promise((resolve, reject) => {
+      let resolved = false;
+      const onMeta = () => { if (!resolved) { resolved = true; video.removeEventListener('loadedmetadata', onMeta); resolve(); } };
+      video.addEventListener('loadedmetadata', onMeta);
+      // safety timeout in case loadedmetadata doesn't fire
+      setTimeout(()=>{ if (!resolved) { resolved = true; resolve(); } }, 2000);
+    });
+    // Some browsers require play() to actually start; try it
+    try { await video.play(); } catch(e){ log('video.play() error (non-fatal)', e); }
+    // Wait until videoWidth/videoHeight are non-zero (gives reliable sizing)
+    const ok = await waitForVideoSize(3000);
+    if (!ok) {
+      log('Warning: video dimensions still zero after timeout — may be camera initializing slowly');
+      statusEl.textContent = 'Status: Camera started but video size not yet available — try again or switch camera';
+    } else {
+      statusEl.textContent = `Status: Camera running — ${video.videoWidth}x${video.videoHeight}`;
+    }
+    // after permission labels may be available; re-enumerate
+    await enumerateCameras();
+    // initialize overlay sizing and demo hooks
+    resizeOverlay();
+    startOverlayRendering();
+    // optionally initialize the rest of your app (Three.js etc.) here
+    log('Camera started and ready');
+  } catch (err) {
+    log('getUserMedia ERROR', err.name, err.message || err);
+    if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+      statusEl.textContent = 'Status: Permission denied. Open site settings and allow camera.';
+    } else if (err.name === 'NotFoundError' || err.name === 'OverconstrainedError') {
+      statusEl.textContent = 'Status: Camera not found or unavailable. Try another camera or close other apps.';
+    } else {
+      statusEl.textContent = 'Status: Camera error: ' + (err.message || err.name);
+    }
+  }
+}
+
+function stopCamera(){
+  if (currentStream) {
+    for (const t of currentStream.getTracks()) try { t.stop(); } catch(e){}
+    currentStream = null;
+    video.srcObject = null;
+    videoTrack = null;
+  }
+  statusEl.textContent = 'Status: Camera stopped';
+  log('Camera stopped');
+}
+
+// wait for non-zero video size within timeout
+function waitForVideoSize(timeoutMs = 3000) {
+  return new Promise((resolve) => {
+    const start = Date.now();
+    (function check(){
+      if (video.videoWidth > 0 && video.videoHeight > 0) return resolve(true);
+      if (Date.now() - start > timeoutMs) return resolve(false);
+      setTimeout(check, 200);
+    })();
+  });
+}
+
+/* ---------- overlay / guide demo ---------- */
+function resizeOverlay(){
+  overlay.width = video.clientWidth || video.videoWidth || window.innerWidth;
+  overlay.height = video.clientHeight || video.videoHeight || window.innerHeight;
+}
+window.addEventListener('resize', resizeOverlay);
+
+let overlayRunning = false;
+function startOverlayRendering(){
+  if (overlayRunning) return;
+  overlayRunning = true;
+  const ctx = overlayCtx;
+  (function loop(){
+    if (video.readyState >= 2 && overlay.width && overlay.height) {
+      // draw a translucent grid and a center crosshair + some informative text
+      ctx.clearRect(0,0,overlay.width,overlay.height);
+      ctx.fillStyle = 'rgba(0,0,0,0.12)'; ctx.fillRect(0,0,overlay.width,overlay.height);
+      // center crosshair
+      const cx = overlay.width/2, cy = overlay.height/2;
+      ctx.strokeStyle = '#fff'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(cx-30, cy); ctx.lineTo(cx+30, cy); ctx.moveTo(cx,cy-30); ctx.lineTo(cx,cy+30); ctx.stroke();
+      ctx.font = '14px system-ui';
+      ctx.fillStyle = '#fff';
+      ctx.fillText(`Video size: ${video.videoWidth} x ${video.videoHeight}`, 12, 20);
+      ctx.fillText(`Track: ${videoTrack ? (videoTrack.label || 'label unavailable') : 'no track'}`, 12, 40);
+      ctx.fillStyle = '#9aa';
+      ctx.fillText(`Auto-capture: ${autoChk.checked ? 'ON' : 'OFF'}`, 12, 60);
+    } else {
+      // waiting
+      ctx.clearRect(0,0,overlay.width,overlay.height);
+      ctx.fillStyle = 'rgba(0,0,0,0.3)'; ctx.fillRect(0,0,overlay.width,overlay.height);
+      ctx.fillStyle = '#fff'; ctx.fillText('Waiting for camera...', 12, 20);
+    }
+    requestAnimationFrame(loop);
+  })();
+}
+
+/* ---------- UI bindings ---------- */
+startBtn.addEventListener('click', async ()=> {
+  startBtn.disabled = true;
+  await startCamera();
+  startBtn.disabled = false;
+});
+stopBtn.addEventListener('click', ()=> stopCamera());
+cameraSelect.addEventListener('change', ()=> { /* user selected a different camera; we won't auto-switch unless they press Start */ });
+
+/* ---------- initial enumeration; note: without permission labels may be empty */
+enumerateCameras().then(()=> log('Camera list loaded')).catch(e=> log('enum error', e));
+
+/* ---------- small save demo (store a tiny canvas image in IndexedDB) ---------- */
+async function saveDemoSnapshot(){
+  if (!video || video.readyState < 2) { log('No video to snapshot'); return; }
+  const c = document.createElement('canvas'); c.width = video.videoWidth; c.height = video.videoHeight;
+  c.getContext('2d').drawImage(video, 0,0, c.width, c.height);
+  const blob = await new Promise(res=> c.toBlob(res, 'image/jpeg', 0.9));
+  const id = 'demo_'+Date.now();
+  await saveFile(id, blob);
+  log('Saved snapshot to IndexedDB as', id);
+  await refreshFilesList();
+}
+
+document.addEventListener('keydown', (e)=> { if (e.key === 's') saveDemoSnapshot(); }); // press 's' on keyboard (desktop) to save demo
+
+/* ---------- files UI ---------- */
+async function refreshFilesList(){
+  const list = document.getElementById('filesList');
+  list.innerHTML = '<div class="small">Loading…</div>';
+  try {
+    const arr = await listFiles();
+    list.innerHTML = '';
+    if (!arr || arr.length === 0) { list.innerHTML = '<div class="small">No saved files</div>'; return; }
+    for (const e of arr.reverse()){
+      const div = document.createElement('div'); div.className = 'fileItem';
+      const img = document.createElement('img'); img.className = 'thumb'; img.src = URL.createObjectURL(e.blob);
+      const meta = document.createElement('div'); meta.innerHTML = `<div style="font-weight:600">${e.id}</div><div class="small">${new Date(e.ts).toLocaleString()}</div>`;
+      const btn = document.createElement('button'); btn.textContent = 'Download'; btn.onclick = ()=> { const a=document.createElement('a'); a.href = img.src; a.download = e.id + '.jpg'; a.click(); };
+      div.append(img, meta, btn);
+      list.appendChild(div);
+    }
+  } catch (err) {
+    log('refresh files error', err);
+    list.innerHTML = '<div class="small">Error loading files</div>';
+  }
+}
+refreshFilesList();
+
+/* ---------- helpful UI hints printed to console for the user ---------- */
+log('Hints:');
+log('- If Start camera fails with NotAllowedError, grant camera permission in site settings and reload.');
+log('- If page served via file://, getUserMedia will fail. Use HTTPS or http://localhost.');
+log('- If another app is using camera, close it and retry.');
+</script>
+</body>
+</html>
