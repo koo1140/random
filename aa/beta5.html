@@ -1,0 +1,661 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+<title>Photosphere — Android</title>
+<style>
+:root{--bg:#08080b;--accent:#1ed760;--muted:#9aa;}
+html,body{height:100%;margin:0;background:var(--bg);color:#fff;font-family:Inter,system-ui,Roboto,Arial;}
+#app{height:100%;display:flex;flex-direction:column;}
+#nav{display:flex;background:#0b0b0e;border-bottom:1px solid #151517}
+.tab{flex:1;padding:12px;text-align:center;cursor:pointer;color:var(--muted)}
+.tab.active{background:#121217;color:#fff;font-weight:600}
+#main{flex:1;position:relative;overflow:hidden}
+#editor,#files{position:absolute;inset:0;display:none;flex-direction:column}
+#editor.active,#files.active{display:flex}
+#cameraWrap{position:relative;flex:1;background:#000;overflow:hidden}
+video#cam{position:absolute;left:0;top:0;width:100%;height:100%;object-fit:cover}
+canvas#overlay, canvas#preview3d, canvas#equirectLow{position:absolute;left:0;top:0;pointer-events:none}
+#controls{position:absolute;left:50%;transform:translateX(-50%);bottom:12px;display:flex;gap:8px;background:rgba(0,0,0,0.28);padding:8px;border-radius:10px}
+button{padding:8px 12px;border-radius:8px;border:0;background:#222;color:#fff;cursor:pointer;font-weight:600}
+button.secondary{background:#2a2a2a}
+#status{position:absolute;left:12px;top:12px;background:rgba(0,0,0,0.45);padding:8px;border-radius:8px;font-size:13px}
+#progressUI{position:absolute;left:50%;transform:translateX(-50%);top:12px;background:rgba(0,0,0,0.6);padding:8px;border-radius:8px;display:flex;gap:8px;align-items:center;visibility:hidden}
+.progressBar{width:200px;height:8px;background:#222;border-radius:8px;overflow:hidden}
+.progressFill{height:100%;background:var(--accent);width:0%}
+#filesList{padding:12px;overflow:auto}
+.fileRow{display:flex;gap:8px;align-items:center;background:#0f0f12;padding:8px;border-radius:8px;margin-bottom:8px}
+.thumb{width:110px;height:60px;object-fit:cover;border-radius:4px;background:#222}
+.fileActions{margin-left:auto;display:flex;gap:6px}
+.small{font-size:12px;color:var(--muted)}
+footer{height:env(safe-area-inset-bottom)}
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="nav">
+    <div class="tab active" data-tab="editor">Editor</div>
+    <div class="tab" data-tab="files">Files</div>
+  </div>
+
+  <div id="main">
+    <div id="editor" class="active">
+      <div id="cameraWrap">
+        <video id="cam" autoplay playsinline muted></video>
+
+        <!-- Three.js renders full-screen here -->
+        <canvas id="preview3d"></canvas>
+
+        <!-- Overlay canvas for guide + mini-globe etc -->
+        <canvas id="overlay"></canvas>
+
+        <!-- invisible low-res equirect canvas used as texture for the sphere -->
+        <canvas id="equirectLow" style="display:none"></canvas>
+
+        <div id="status">Initializing camera...</div>
+
+        <div id="controls">
+          <button id="manualCaptureBtn">Manual</button>
+          <button id="autoToggleBtn" class="secondary">Auto: ON</button>
+          <button id="processBtn">Process & Stitch</button>
+        </div>
+
+        <div id="progressUI">
+          <div class="small" id="progressText">Processing…</div>
+          <div class="progressBar"><div class="progressFill" id="progressFill"></div></div>
+        </div>
+      </div>
+    </div>
+
+    <div id="files">
+      <div style="padding:12px;display:flex;gap:8px;align-items:center">
+        <button id="refreshBtn">Refresh</button>
+        <div class="small" style="margin-left:8px">Stored panoramas (IndexedDB)</div>
+      </div>
+      <div id="filesList"></div>
+    </div>
+  </div>
+
+  <footer></footer>
+</div>
+
+<script type="module">
+/*
+  Photosphere Android single-file app
+  - Android-only (no iOS permission code)
+  - Live 3D preview, mini-globe guide with thumbnails, auto/manual capture
+  - Pixel-average stitching (downscaled) with progress
+  - IndexedDB for storage; open saved panoramas in viewer
+  - Tap mini-globe marker to retake that point
+*/
+
+import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.162.0/build/three.module.js';
+
+/* ---------------- UI refs ---------------- */
+const tabs = document.querySelectorAll('.tab');
+const editor = document.getElementById('editor');
+const files = document.getElementById('files');
+const camVideo = document.getElementById('cam');
+const overlay = document.getElementById('overlay');
+const overlayCtx = overlay.getContext('2d');
+const preview3d = document.getElementById('preview3d');
+const equirectLow = document.getElementById('equirectLow');
+const statusEl = document.getElementById('status');
+const manualCaptureBtn = document.getElementById('manualCaptureBtn');
+const autoToggleBtn = document.getElementById('autoToggleBtn');
+const processBtn = document.getElementById('processBtn');
+const progressUI = document.getElementById('progressUI');
+const progressText = document.getElementById('progressText');
+const progressFill = document.getElementById('progressFill');
+const filesList = document.getElementById('filesList');
+const refreshBtn = document.getElementById('refreshBtn');
+
+/* ---------- Tabs ---------- */
+tabs.forEach(t => t.addEventListener('click', () => {
+  tabs.forEach(x => x.classList.remove('active'));
+  t.classList.add('active');
+  if (t.dataset.tab === 'editor') {
+    editor.classList.add('active'); files.classList.remove('active');
+  } else {
+    editor.classList.remove('active'); files.classList.add('active');
+    refreshFiles();
+  }
+}));
+
+/* ---------- IndexedDB ---------- */
+const DB_NAME = 'photosphere_android_db';
+const STORE_NAME = 'panos';
+function openDb(){ return new Promise((res,rej)=>{ const r=indexedDB.open(DB_NAME,1); r.onupgradeneeded=()=>{ const db=r.result; if(!db.objectStoreNames.contains(STORE_NAME)) db.createObjectStore(STORE_NAME,{keyPath:'id'}); }; r.onsuccess=()=>res(r.result); r.onerror=()=>rej(r.error); }); }
+async function savePanoToDb(id, meta, blob){ const db=await openDb(); return new Promise((res,rej)=>{ const tx=db.transaction(STORE_NAME,'readwrite'); tx.objectStore(STORE_NAME).put({id,meta,blob,ts:Date.now()}); tx.oncomplete=()=>res(); tx.onerror=()=>rej(tx.error); }); }
+async function listPanoramas(){ const db=await openDb(); return new Promise((res,rej)=>{ const arr=[]; const tx=db.transaction(STORE_NAME,'readonly'); const cur=tx.objectStore(STORE_NAME).openCursor(); cur.onsuccess=e=>{ const c=e.target.result; if(c){ arr.push(c.value); c.continue(); } else res(arr); }; cur.onerror=()=>rej(cur.error); }); }
+async function getPano(id){ const db=await openDb(); return new Promise((res,rej)=>{ const tx=db.transaction(STORE_NAME,'readonly'); const r=tx.objectStore(STORE_NAME).get(id); r.onsuccess=()=>res(r.result); r.onerror=()=>rej(r.error); }); }
+async function deletePano(id){ const db=await openDb(); return new Promise((res,rej)=>{ const tx=db.transaction(STORE_NAME,'readwrite'); const r=tx.objectStore(STORE_NAME).delete(id); r.onsuccess=()=>res(); r.onerror=()=>rej(r.error); }); }
+
+/* ---------- Guide points (26) ---------- */
+const yawSteps = [0,45,90,135,180,225,270,315];
+const pitchLayers = [45,0,-45];
+const guidePoints = [];
+for (let p of pitchLayers) for (let y of yawSteps) guidePoints.push({yaw:y,pitch:p});
+guidePoints.push({yaw:0,pitch:90}); // top
+guidePoints.push({yaw:0,pitch:-90}); // bottom
+guidePoints.forEach((g,i)=> g.name = `P${i+1}`);
+
+/* ---------- State ---------- */
+let captured = []; // {dataUrl,yaw,pitch,w,h}
+let autoCapture = true;
+let tolerance = 12; // degrees
+let holdMillis = 2000;
+let holdTimer = null;
+
+/* ---------- Orientation (Android) ---------- */
+let deviceYaw=0, devicePitch=0, deviceRoll=0;
+let hasOrientation=false;
+function initOrientation(){
+  // Android: DeviceOrientationEvent typically available without permission
+  window.addEventListener('deviceorientation', ev=>{
+    deviceYaw = (ev.alpha ?? 0) % 360;
+    devicePitch = ev.beta ?? 0;
+    deviceRoll = ev.gamma ?? 0;
+    hasOrientation = true;
+  }, true);
+}
+
+/* ---------- Camera init ---------- */
+async function initCamera(){
+  statusEl.textContent = 'Requesting camera...';
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({video:{ facingMode: 'environment' }, audio:false});
+    camVideo.srcObject = stream;
+    await new Promise(r => camVideo.addEventListener('loadedmetadata', r, {once:true}));
+    try { await camVideo.play(); } catch(e) { /* autoplay may be blocked, but srcObject set */ }
+    statusEl.textContent = 'Camera ready';
+    resizeAll();
+    startOverlayLoop();
+    initThreePreview();
+    // initial fill so sphere not black
+    fillEquirectBackground();
+    updateThreeTexture();
+  } catch (e) {
+    console.error('Camera init failed', e);
+    statusEl.textContent = 'Camera error: ' + (e.message || e.name || e);
+  }
+}
+
+/* ---------- Canvas sizing ---------- */
+function resizeAll(){
+  const w = camVideo.videoWidth || window.innerWidth;
+  const h = camVideo.videoHeight || window.innerHeight;
+  overlay.width = w; overlay.height = h;
+  preview3d.width = w; preview3d.height = h;
+  equirectLow.width = 1024; equirectLow.height = 512;
+  if (threeRenderer) threeRenderer.setSize(w,h);
+}
+
+/* ---------- Mini-globe placement helpers ---------- */
+function mapYawPitchToGlobe(yaw, pitch, cx, cy, r){
+  // yaw 0..360 mapped to angle around, pitch -90..90 mapped to vertical radius
+  const yawR = yaw * Math.PI/180;
+  const pr = pitch / 90; // -1..1
+  const rr = r * (1 - Math.abs(pr)*0.5); // shrink towards poles slightly
+  const gx = cx + Math.cos(yawR) * rr;
+  const gy = cy - pr * r * 0.75;
+  return [gx, gy];
+}
+
+/* ---------- Overlay drawing (mini-globe, markers, thumbnails, target rings) ---------- */
+const globeCx = 110, globeCy = 110, globeR = 90;
+function drawOverlay(){
+  if (!overlay.width || !overlay.height) return;
+  const w = overlay.width, h = overlay.height;
+  const ctx = overlayCtx;
+  ctx.clearRect(0,0,w,h);
+  // dim background lightly
+  ctx.fillStyle = 'rgba(0,0,0,0.10)'; ctx.fillRect(0,0,w,h);
+
+  // draw mini-globe
+  ctx.save();
+  ctx.beginPath(); ctx.arc(globeCx, globeCy, globeR, 0, Math.PI*2); ctx.closePath();
+  ctx.fillStyle = 'rgba(10,10,12,0.95)'; ctx.fill();
+  ctx.strokeStyle = 'rgba(255,255,255,0.06)'; ctx.lineWidth=2; ctx.stroke();
+
+  // grid lines (meridians)
+  ctx.strokeStyle = 'rgba(255,255,255,0.04)'; ctx.lineWidth=1;
+  for (let a=0;a<360;a+=45){
+    const [x1,y1] = mapYawPitchToGlobe(a, -90, globeCx, globeCy, globeR);
+    const [x2,y2] = mapYawPitchToGlobe(a, 90, globeCx, globeCy, globeR);
+    ctx.beginPath(); ctx.moveTo(x1,y1); ctx.lineTo(x2,y2); ctx.stroke();
+  }
+  // lat lines
+  for (let p=-60;p<=60;p+=30){
+    ctx.beginPath();
+    // sample many points on latitude
+    for (let a=0;a<=360;a+=10){
+      const [x,y] = mapYawPitchToGlobe(a,p,globeCx,globeCy,globeR);
+      if (a===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
+    }
+    ctx.stroke();
+  }
+
+  // draw markers
+  for (let i=0;i<guidePoints.length;i++){
+    const gp = guidePoints[i];
+    const [mx,my] = mapYawPitchToGlobe(gp.yaw, gp.pitch, globeCx, globeCy, globeR);
+    const taken = i < captured.length;
+    ctx.beginPath(); ctx.arc(mx,my, taken ? 10 : 8, 0, Math.PI*2); ctx.fillStyle = taken ? 'rgba(30,215,96,0.95)' : 'rgba(255,80,80,0.95)'; ctx.fill();
+    ctx.fillStyle = '#fff'; ctx.font='11px system-ui'; ctx.fillText(taken ? '✓' : (i+1), mx+14, my+4);
+    // draw thumbnail if taken
+    if (taken) {
+      const thumb = new Image(); thumb.src = captured[i].dataUrl;
+      (function(timg, tx, ty){
+        timg.onload = ()=> {
+          ctx.save();
+          ctx.beginPath(); ctx.rect(tx-18, ty-12, 36, 24); ctx.clip();
+          ctx.drawImage(timg, tx-18, ty-12, 36, 24);
+          ctx.restore();
+        };
+      })(thumb, mx, my);
+    }
+  }
+
+  ctx.restore();
+
+  // draw center target (on main view)
+  const targetIdx = Math.min(captured.length, guidePoints.length-1);
+  const target = guidePoints[targetIdx];
+  // map target to screen using equirect simple mapping
+  const u = (target.yaw % 360) / 360;
+  const v = 1 - ((target.pitch + 90)/180);
+  const sx = Math.round(u * w), sy = Math.round(v * h);
+  // small crosshair
+  ctx.strokeStyle = 'rgba(255,255,255,0.95)'; ctx.lineWidth=2;
+  ctx.beginPath(); ctx.arc(sx, sy, 22, 0, Math.PI*2); ctx.stroke();
+  // tolerance ring
+  const pxYaw = (tolerance/360) * w;
+  const pxPitch = (tolerance/180) * h;
+  const rad = Math.max(pxYaw, pxPitch) * 1.15;
+  ctx.strokeStyle = 'rgba(30,215,96,0.6)'; ctx.lineWidth=2; ctx.beginPath(); ctx.arc(sx,sy,rad,0,Math.PI*2); ctx.stroke();
+
+  // small info
+  ctx.fillStyle = 'rgba(0,0,0,0.5)'; ctx.fillRect(12,12,300,36);
+  ctx.fillStyle = '#fff'; ctx.font='13px system-ui'; ctx.fillText(`Yaw:${deviceYaw.toFixed(1)}° Pitch:${devicePitch.toFixed(1)}° Captured:${captured.length}/${guidePoints.length}`, 20, 36);
+}
+
+/* ---------- Low-res equirect canvas live mapping ---------- */
+const eqCtx = equirectLow.getContext('2d');
+function fillEquirectBackground(){
+  const W = equirectLow.width, H = equirectLow.height;
+  // radial gradient to avoid pure black sphere
+  const g = eqCtx.createLinearGradient(0,0,0,H);
+  g.addColorStop(0,'#1a1a1f'); g.addColorStop(1,'#050507');
+  eqCtx.fillStyle = g; eqCtx.fillRect(0,0,W,H);
+}
+function updateEquirectLive(){
+  const W = equirectLow.width, H = equirectLow.height;
+  fillEquirectBackground();
+  // draw each capture as a rectangle centered at (u,v) with blending
+  eqCtx.globalCompositeOperation = 'lighter'; // additive blend for visibility
+  for (let i=0;i<captured.length;i++){
+    const c = captured[i];
+    const img = new Image(); img.src = c.dataUrl;
+    (function(img, c){
+      img.onload = ()=>{
+        const scale = Math.min(1, (W*0.5) / img.width);
+        const drawW = Math.max(64, Math.round(img.width * scale));
+        const drawH = Math.round(drawW * (img.height / img.width));
+        const u = ((c.yaw % 360) + 360) % 360 / 360;
+        const v = 1 - ((c.pitch + 90)/180);
+        let x = Math.round(u * W - drawW/2);
+        let y = Math.round(v * H - drawH/2);
+        eqCtx.globalAlpha = 0.95;
+        eqCtx.drawImage(img, x, y, drawW, drawH);
+        // horizontal wrap
+        if (x < 0) eqCtx.drawImage(img, x + W, y, drawW, drawH);
+        if (x + drawW > W) eqCtx.drawImage(img, x - W, y, drawW, drawH);
+        eqCtx.globalAlpha = 1;
+        // tell three texture to update
+        if (threeTexture) threeTexture.needsUpdate = true;
+      };
+    })(img,c);
+  }
+}
+
+/* ---------- Three.js live preview (texture = equirectLow) ---------- */
+let threeRenderer=null, threeScene=null, threeCamera=null, threeSphere=null, threeTexture=null;
+function initThreePreview(){
+  if (threeRenderer) return;
+  threeRenderer = new THREE.WebGLRenderer({ canvas: preview3d, antialias:true });
+  threeRenderer.setSize(preview3d.width, preview3d.height);
+  threeScene = new THREE.Scene();
+  threeCamera = new THREE.PerspectiveCamera(75, preview3d.width / preview3d.height, 0.1, 1000);
+  threeCamera.position.set(0,0,0.1);
+  threeTexture = new THREE.CanvasTexture(equirectLow);
+  threeTexture.minFilter = THREE.LinearFilter; threeTexture.magFilter = THREE.LinearFilter;
+  const geo = new THREE.SphereGeometry(5, 64,64); geo.scale(-1,1,1);
+  const mat = new THREE.MeshBasicMaterial({ map: threeTexture });
+  threeSphere = new THREE.Mesh(geo, mat);
+  threeScene.add(threeSphere);
+  // orientation -> camera quaternion (Android)
+  window.addEventListener('deviceorientation', ev=>{
+    const a = THREE.MathUtils.degToRad(ev.alpha || 0);
+    const b = THREE.MathUtils.degToRad(ev.beta || 0);
+    const g = THREE.MathUtils.degToRad(ev.gamma || 0);
+    const euler = new THREE.Euler(b, a, -g, 'YXZ');
+    threeCamera.quaternion.setFromEuler(euler);
+  }, true);
+  (function loop(){ requestAnimationFrame(loop); if (threeRenderer && threeScene && threeCamera) threeRenderer.render(threeScene, threeCamera); })();
+  window.addEventListener('resize', ()=> { const w = overlay.width||window.innerWidth, h = overlay.height||window.innerHeight; threeRenderer.setSize(w,h); threeCamera.aspect = w/h; threeCamera.updateProjectionMatrix(); });
+}
+
+/* ---------- Capture actions ---------- */
+function captureCurrent(targetOverride=null){
+  if (camVideo.readyState < 2) { statusEl.textContent = 'Camera not ready'; return; }
+  const canvas = document.createElement('canvas');
+  canvas.width = camVideo.videoWidth || 1280;
+  canvas.height = camVideo.videoHeight || 720;
+  const cctx = canvas.getContext('2d');
+  cctx.drawImage(camVideo, 0,0, canvas.width, canvas.height);
+  const dataUrl = canvas.toDataURL('image/jpeg', 0.92);
+  const idx = captured.length;
+  const gp = targetOverride ?? guidePoints[Math.min(idx, guidePoints.length-1)];
+  captured.push({ dataUrl, yaw: gp.yaw, pitch: gp.pitch, w: canvas.width, h: canvas.height });
+  statusEl.textContent = `Captured ${captured.length}/${guidePoints.length}`;
+  updateEquirectLive();
+  drawOverlay();
+}
+manualCaptureBtn.addEventListener('click', ()=> captureCurrent());
+
+autoToggleBtn.addEventListener('click', ()=>{
+  autoCapture = !autoCapture;
+  autoToggleBtn.textContent = autoCapture ? 'Auto: ON' : 'Auto: OFF';
+  autoToggleBtn.classList.toggle('secondary', !autoCapture);
+  if (!autoCapture && holdTimer) { clearTimeout(holdTimer); holdTimer = null; }
+});
+
+/* ---------- Auto-capture logic ---------- */
+function angleDiff(a,b){ let d = Math.abs(((a - b + 180) % 360 + 360) % 360 - 180); return d; }
+function maybeAutoCapture(){
+  if (!autoCapture || !hasOrientation) return;
+  const idx = Math.min(captured.length, guidePoints.length-1);
+  const t = guidePoints[idx];
+  const yd = angleDiff(deviceYaw, t.yaw);
+  const pd = Math.abs(devicePitch - t.pitch);
+  const inside = (yd <= tolerance) && (pd <= tolerance);
+  if (inside){
+    if (!holdTimer) {
+      statusEl.textContent = `Aligned — hold ${Math.round(holdMillis/1000)}s`;
+      holdTimer = setTimeout(()=>{ captureCurrent(t); holdTimer=null; }, holdMillis);
+    }
+  } else {
+    if (holdTimer) { clearTimeout(holdTimer); holdTimer=null; statusEl.textContent=''; }
+  }
+}
+
+/* ---------- Overlay loop ---------- */
+let overlayRunning = false;
+function startOverlayLoop(){
+  if (overlayRunning) return;
+  overlayRunning = true;
+  (function loop(){
+    drawOverlay();
+    maybeAutoCapture();
+    requestAnimationFrame(loop);
+  })();
+}
+
+/* ---------- Stitching (pixel-average) ---------- */
+function setProgress(pct, text=''){ if (pct>=0 && pct<100){ progressUI.style.visibility='visible'; progressText.textContent=text||`${Math.round(pct)}%`; progressFill.style.width=`${Math.round(pct)}%`; } else { progressUI.style.visibility='hidden'; progressFill.style.width='0%'; } }
+function loadImageToCanvas(dataUrl, maxWidth=640){ return new Promise((res,rej)=>{ const img=new Image(); img.onload=()=>{ const scale=Math.min(1, maxWidth/img.width); const cw=Math.max(4, Math.round(img.width*scale)); const ch=Math.max(4, Math.round(img.height*scale)); const c=document.createElement('canvas'); c.width=cw; c.height=ch; c.getContext('2d').drawImage(img,0,0,cw,ch); res({canvas:c,w:cw,h:ch}); }; img.onerror=(e)=>rej(e); img.src=dataUrl; }); }
+function pixelToDir(sx,sy,sw,sh,fovH){ const cx=sw/2, cy=sh/2; const f=(sw/2)/Math.tan(fovH/2); const x=sx-cx; const y=cy-sy; const z=f; const L=Math.sqrt(x*x+y*y+z*z); return [x/L,y/L,z/L]; }
+function rotateDir(vec,yawDeg,pitchDeg){ const yaw=yawDeg*Math.PI/180, pitch=pitchDeg*Math.PI/180; let x=vec[0], y=vec[1], z=vec[2]; const cosP=Math.cos(pitch), sinP=Math.sin(pitch); let y2=y*cosP - z*sinP; let z2=y*sinP + z*cosP; const cosY=Math.cos(yaw), sinY=Math.sin(yaw); let x3 = x*cosY + z2*sinY; let z3 = -x*sinY + z2*cosY; return [x3,y2,z3]; }
+
+async function stitchCaptured({outW=2048,outH=1024,srcMaxWidth=640,fovDeg=60}={}){
+  if (captured.length===0) throw new Error('No captures');
+  setProgress(0,'Preparing images...');
+  const sources = [];
+  for (let c of captured){ const ld = await loadImageToCanvas(c.dataUrl, srcMaxWidth); sources.push({canvas:ld.canvas,w:ld.w,h:ld.h,yaw:c.yaw,pitch:c.pitch}); }
+  const W=outW,H=outH,total=W*H;
+  const accumR=new Float32Array(total), accumG=new Float32Array(total), accumB=new Float32Array(total);
+  const counts=new Uint32Array(total);
+  let totalSrc = sources.reduce((s,sr)=>s + sr.w*sr.h, 0), processed=0;
+  const fov = fovDeg*Math.PI/180;
+  for (let s of sources){
+    const data = s.canvas.getContext('2d').getImageData(0,0,s.w,s.h).data;
+    const step = Math.max(1, Math.floor(Math.sqrt((s.w*s.h)/90000)));
+    for (let y=0;y<s.h;y+=step){
+      await new Promise(r=>setTimeout(r,0));
+      for (let x=0;x<s.w;x+=step){
+        const i4=(y*s.w+x)*4;
+        const r=data[i4], g=data[i4+1], b=data[i4+2], a=data[i4+3];
+        if (a < 10){ processed += step; continue; }
+        const dir = pixelToDir(x,y,s.w,s.h,fov);
+        const world = rotateDir(dir, s.yaw, s.pitch);
+        const vx = world[0], vy = world[1], vz = world[2];
+        const lon = Math.atan2(vx, vz);
+        const lat = Math.asin(Math.max(-1, Math.min(1, vy)));
+        let u = (lon + Math.PI) / (2*Math.PI);
+        let v = 1 - (lat + Math.PI/2) / Math.PI;
+        let px = Math.floor(u*W), py = Math.floor(v*H);
+        if (px < 0) px += W;
+        if (px >= W) px -= W;
+        if (py < 0 || py >= H){ processed += step; continue; }
+        const outIdx = py*W + px;
+        accumR[outIdx] += r; accumG[outIdx] += g; accumB[outIdx] += b; counts[outIdx]++;
+        processed += step;
+      }
+      const pct = Math.min(99, (processed/totalSrc)*100);
+      setProgress(pct, `Mapping ${Math.round(pct)}%`);
+    }
+  }
+  setProgress(99,'Composing...');
+  const outC = document.createElement('canvas'); outC.width=W; outC.height=H;
+  const outCtx = outC.getContext('2d');
+  const outImg = outCtx.createImageData(W,H);
+  const batch = 20000;
+  for (let i=0;i<total;i+=batch){
+    const lim = Math.min(i+batch,total);
+    for (let j=i;j<lim;j++){
+      const di=j*4; const c = counts[j];
+      if (c===0){ outImg.data[di]=0; outImg.data[di+1]=0; outImg.data[di+2]=0; outImg.data[di+3]=255; }
+      else { outImg.data[di]=Math.round(accumR[j]/c); outImg.data[di+1]=Math.round(accumG[j]/c); outImg.data[di+2]=Math.round(accumB[j]/c); outImg.data[di+3]=255; }
+    }
+    await new Promise(r=>setTimeout(r,0));
+  }
+  outCtx.putImageData(outImg,0,0);
+  const blob = await new Promise(res => outC.toBlob(res,'image/jpeg',0.92));
+  setProgress(-1,'');
+  return {canvas: outC, blob};
+}
+
+/* ---------- UI actions ---------- */
+manualCaptureBtn.addEventListener('click', ()=> captureCurrent());
+autoToggleBtn.addEventListener('click', ()=> { autoCapture = !autoCapture; autoToggleBtn.textContent = autoCapture ? 'Auto: ON' : 'Auto: OFF'; autoToggleBtn.classList.toggle('secondary', !autoCapture); if (!autoCapture && holdTimer) { clearTimeout(holdTimer); holdTimer = null; } });
+processBtn.addEventListener('click', async ()=>{
+  if (captured.length === 0) { alert('No captures'); return; }
+  try {
+    setProgress(0,'Stitching...');
+    const res = await stitchCaptured({outW:2048,outH:1024,srcMaxWidth:640,fovDeg:60});
+    const id = 'pano_' + Date.now();
+    await savePanoToDb(id, {sources: captured.length, w: res.canvas.width, h: res.canvas.height}, res.blob);
+    captured = [];
+    fillEquirectBackground();
+    updateThreeTexture();
+    alert('Saved panorama to Files');
+    refreshFiles();
+  } catch (e) { console.error(e); alert('Processing error: ' + (e && e.message ? e.message : e)); } finally { setProgress(-1,''); }
+});
+
+/* ---------- Files UI ---------- */
+refreshBtn.addEventListener('click', refreshFiles);
+async function refreshFiles(){
+  filesList.innerHTML = '<div class="small" style="padding:12px">Loading…</div>';
+  try {
+    const list = await listPanoramas();
+    filesList.innerHTML = '';
+    if (!list || list.length===0){ filesList.innerHTML = '<div class="small" style="padding:12px">No panoramas</div>'; return; }
+    for (let entry of list.reverse()){
+      const row = document.createElement('div'); row.className='fileRow';
+      const img = document.createElement('img'); img.className='thumb'; const url = URL.createObjectURL(entry.blob); img.src = url;
+      const meta = document.createElement('div'); meta.innerHTML = `<div style="font-weight:600">${entry.id}</div><div class="small">Saved: ${new Date(entry.ts).toLocaleString()}</div>`;
+      const actions = document.createElement('div'); actions.className='fileActions';
+      const openBtn = document.createElement('button'); openBtn.textContent='Open'; openBtn.onclick = ()=> openPanoInViewer(entry.blob);
+      const dlBtn = document.createElement('button'); dlBtn.textContent='Download'; dlBtn.onclick = ()=> { const a=document.createElement('a'); a.href = url; a.download = entry.id + '.jpg'; a.click(); };
+      const delBtn = document.createElement('button'); delBtn.textContent='Delete'; delBtn.onclick = async ()=> { if (confirm('Delete?')) { await deletePano(entry.id); refreshFiles(); } };
+      actions.append(openBtn, dlBtn, delBtn);
+      row.append(img, meta, actions);
+      filesList.appendChild(row);
+    }
+  } catch (e) { console.error(e); filesList.innerHTML = '<div class="small" style="padding:12px">Error loading</div>'; }
+}
+
+/* ---------- Open saved panorama in viewer (replace live texture) ---------- */
+function openPanoInViewer(blob){
+  const url = URL.createObjectURL(blob);
+  const loader = new THREE.TextureLoader();
+  loader.load(url, tex => {
+    if (threeSphere && threeSphere.material) {
+      threeSphere.material.map = tex;
+      threeSphere.material.needsUpdate = true;
+    }
+  });
+  // switch to editor view so your phone acts as the VR viewer
+  tabs.forEach(t=>t.classList.remove('active'));
+  document.querySelector('.tab[data-tab="editor"]').classList.add('active');
+  editor.classList.add('active'); files.classList.remove('active');
+  statusEl.textContent = 'Viewing panorama — move phone to look around';
+}
+
+/* ---------- Three texture update helper ---------- */
+function updateThreeTexture(){ if (threeTexture) { threeTexture.needsUpdate = true; } }
+
+/* ---------- Tap overlay to retake a point ---------- */
+overlay.addEventListener('click', (ev)=>{
+  // compute click on globe: is it near a marker? if yes, retake that index
+  const rect = overlay.getBoundingClientRect();
+  const x = ev.clientX - rect.left;
+  const y = ev.clientY - rect.top;
+  // check markers
+  for (let i=0;i<guidePoints.length;i++){
+    const gp=guidePoints[i];
+    const [mx,my] = mapYawPitchToGlobe(gp.yaw,gp.pitch,globeCx,globeCy,globeR);
+    const dx = mx - x, dy = my - y;
+    if (Math.sqrt(dx*dx + dy*dy) < 18) {
+      // retake mode: prompt user to confirm
+      if (confirm(`Retake point ${i+1}?`)) {
+        // remove old if exists (replace)
+        if (i < captured.length) captured.splice(i,1);
+        // set target to this index: temporarily set captured.length to i so next auto/manual maps to it
+        // We'll capture immediately (manual flow) — give user a second to aim
+        statusEl.textContent = `Aim at point ${i+1} and press Manual capture`;
+        // move target by inserting a placeholder? easiest: set up a small one-shot capture
+        // We'll capture manually when user clicks Manual button — so just set a variable
+        // For simplicity here trigger immediate manual capture (so user must aim then tap retake)
+        captureCurrentForIndex(i);
+      }
+      return;
+    }
+  }
+});
+
+/* helper to capture for a specific index */
+function captureCurrentForIndex(index){
+  if (camVideo.readyState < 2) { statusEl.textContent='Camera not ready'; return; }
+  const canvas = document.createElement('canvas');
+  canvas.width = camVideo.videoWidth || 1280; canvas.height = camVideo.videoHeight || 720;
+  const cctx = canvas.getContext('2d'); cctx.drawImage(camVideo, 0,0, canvas.width, canvas.height);
+  const dataUrl = canvas.toDataURL('image/jpeg', 0.92);
+  const gp = guidePoints[index];
+  // if replacing existing, replace slot; else insert at position index
+  if (index < captured.length) captured[index] = { dataUrl, yaw: gp.yaw, pitch: gp.pitch, w: canvas.width, h: canvas.height };
+  else {
+    // insert blanks up to index
+    while (captured.length < index) captured.push({ dataUrl: null, yaw: guidePoints[captured.length].yaw, pitch: guidePoints[captured.length].pitch, w:0,h:0 });
+    captured.push({ dataUrl, yaw: gp.yaw, pitch: gp.pitch, w: canvas.width, h: canvas.height });
+  }
+  statusEl.textContent = `Captured (retake) point ${index+1}`;
+  updateEquirectLive(); drawOverlay();
+}
+
+/* ---------- start everything ---------- */
+function startAll(){
+  initOrientation();
+  initCamera();
+  startOverlayLoop();
+  window.addEventListener('resize', resizeAll);
+}
+startAll();
+
+/* ---------- helper to ensure three preview created and texture updated ---------- */
+function initThreePreview(){
+  // defined earlier, avoid duplicate creation
+  if (threeRenderer) return;
+  // proceed with initialization done above in main init (we call small version here if needed)
+  threeRenderer = new THREE.WebGLRenderer({ canvas: preview3d, antialias:true });
+  threeRenderer.setSize(preview3d.width, preview3d.height);
+  threeScene = new THREE.Scene();
+  threeCamera = new THREE.PerspectiveCamera(75, preview3d.width/preview3d.height, 0.1, 1000);
+  threeCamera.position.set(0,0,0.1);
+  threeTexture = new THREE.CanvasTexture(equirectLow);
+  threeTexture.minFilter = THREE.LinearFilter; threeTexture.magFilter = THREE.LinearFilter;
+  const geo = new THREE.SphereGeometry(5,64,64); geo.scale(-1,1,1);
+  const mat = new THREE.MeshBasicMaterial({ map: threeTexture });
+  threeSphere = new THREE.Mesh(geo, mat);
+  threeScene.add(threeSphere);
+  window.addEventListener('deviceorientation', ev=>{
+    const a = THREE.MathUtils.degToRad(ev.alpha || 0);
+    const b = THREE.MathUtils.degToRad(ev.beta || 0);
+    const g = THREE.MathUtils.degToRad(ev.gamma || 0);
+    const euler = new THREE.Euler(b, a, -g, 'YXZ');
+    threeCamera.quaternion.setFromEuler(euler);
+  }, true);
+  (function loop(){ requestAnimationFrame(loop); if (threeRenderer && threeScene && threeCamera) threeRenderer.render(threeScene, threeCamera); })();
+}
+
+/* ---------- small helper to call update equirect and mark texture ---------- */
+function updateEquirectLive(){
+  // draw mapping and mark texture updated
+  try { updateEquirectLiveCanvas(); } catch(e){ console.warn(e); }
+  if (threeTexture) threeTexture.needsUpdate = true;
+}
+
+// decoupled to avoid name collisions and hoisting (we used updateEquirectLive earlier)
+function updateEquirectLiveCanvas(){
+  const W = equirectLow.width, H = equirectLow.height;
+  fillEquirectBackground();
+  eqCtx = equirectLow.getContext('2d'); // ensure
+  eqCtx.globalCompositeOperation = 'lighter';
+  for (let i=0;i<captured.length;i++){
+    const c = captured[i];
+    if (!c || !c.dataUrl) continue;
+    const img = new Image(); img.src = c.dataUrl;
+    (function(img,c){
+      img.onload = ()=> {
+        const scale = Math.min(1, (W*0.45)/img.width);
+        const dw = Math.max(48, Math.round(img.width*scale));
+        const dh = Math.round(dw * (img.height/img.width));
+        const u = ((c.yaw%360)+360)%360 / 360;
+        const v = 1 - ((c.pitch + 90)/180);
+        let x = Math.round(u*W - dw/2);
+        let y = Math.round(v*H - dh/2);
+        eqCtx.globalAlpha = 0.95;
+        eqCtx.drawImage(img, x, y, dw, dh);
+        if (x < 0) eqCtx.drawImage(img, x + W, y, dw, dh);
+        if (x + dw > W) eqCtx.drawImage(img, x - W, y, dw, dh);
+        eqCtx.globalAlpha = 1;
+        if (threeTexture) threeTexture.needsUpdate = true;
+      };
+    })(img,c);
+  }
+}
+
+/* ---------- safe initial fill & context ---------- */
+let eqCtx = equirectLow.getContext('2d');
+fillEquirectBackground();
+
+/* ---------- Expose a debug hook ---------- */
+window.photosphere_debug = { captured, guidePoints };
+
+/* ---------- End of script ---------- */
+</script>
+</body>
+</html>
