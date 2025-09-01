@@ -1,0 +1,353 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Photosphere — Minimal Working (Android)</title>
+<style>
+  :root { --bg: #07070a; --panel: #0d0d10; --muted: #9aa; --accent: #1ed760; }
+  html,body { height:100%; margin:0; font-family: Inter, system-ui, Roboto, Arial; background:var(--bg); color:#fff; }
+  #app { height:100%; display:flex; flex-direction:column; }
+  #nav { display:flex; background:var(--panel); border-bottom:1px solid #111; }
+  .tab { flex:1; padding:12px; text-align:center; cursor:pointer; color:var(--muted); user-select:none; }
+  .tab.active { background:#141418; color:#fff; font-weight:600; }
+  #content { flex:1; display:flex; gap:12px; padding:12px; box-sizing:border-box; }
+  #left { flex:1; display:flex; flex-direction:column; gap:8px; min-width:0; }
+  #controls { display:flex; gap:8px; align-items:center; }
+  select,input,button { padding:8px 10px; border-radius:8px; border:0; background:#121214; color:#fff; }
+  button.primary { background:var(--accent); color:#000; font-weight:700; }
+  #videoWrap { position:relative; height:calc(100vh - 160px); min-height:360px; background:#000; border-radius:8px; overflow:hidden; }
+  video { width:100%; height:100%; object-fit:cover; display:block; }
+  canvas#overlay { position:absolute; left:0; top:0; pointer-events:none; }
+  #status { padding:8px; background:rgba(0,0,0,0.45); border-radius:8px; display:inline-block; margin-top:6px; }
+  #right { width:360px; max-width:40%; display:flex; flex-direction:column; gap:8px; }
+  #filesList { overflow:auto; max-height:calc(100vh - 220px); padding-right:6px; }
+  .fileRow { display:flex; gap:8px; align-items:center; padding:8px; background:#0f0f12; border-radius:8px; margin-bottom:8px; }
+  .thumb { width:110px; height:66px; object-fit:cover; border-radius:6px; background:#111; }
+  .small { font-size:12px; color:var(--muted); }
+  #console { margin-top:8px; background:#050506; padding:8px; border-radius:6px; font-family:monospace; font-size:12px; max-height:140px; overflow:auto; color:#8f8; }
+  footer { height:env(safe-area-inset-bottom); }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="nav">
+    <div class="tab active" data-tab="editor">Editor</div>
+    <div class="tab" data-tab="files">Files</div>
+  </div>
+
+  <div id="content">
+    <div id="left">
+      <div id="controls">
+        <label class="small">Camera:</label>
+        <select id="cameraSelect"></select>
+        <button id="startBtn" class="primary">Start camera</button>
+        <button id="stopBtn">Stop</button>
+        <button id="captureBtn">Capture</button>
+        <label style="margin-left:auto" class="small">Auto: <input id="autoChk" type="checkbox" checked /></label>
+      </div>
+
+      <div id="videoWrap">
+        <video id="video" autoplay playsinline muted></video>
+        <canvas id="overlay"></canvas>
+      </div>
+
+      <div id="status">Status: idle</div>
+    </div>
+
+    <div id="right">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <div style="font-weight:700">Saved panoramas (demo snapshots)</div>
+        <button id="refreshFiles">Refresh</button>
+      </div>
+      <div id="filesList"></div>
+
+      <div style="margin-top:6px">
+        <button id="processBtn">Process & Save Panorama (demo)</button>
+      </div>
+
+      <div style="margin-top:12px" class="small">Tip: pick the back camera, press Start, then Capture. Files show in the right column.</div>
+
+      <div id="console" aria-live="polite">Console log: (messages will appear here)</div>
+    </div>
+  </div>
+
+  <footer></footer>
+</div>
+
+<script>
+/*
+ Minimal robust camera + files UI targeted for Android.
+ - uses deviceId cameras enumeration + start/stop
+ - overlay crosshair + live thumbnail in overlay
+ - stores captured images in IndexedDB and lists them in Files
+ - auto-capture basic skeleton (uses deviceorientation)
+ - defensive: waits for loadedmetadata and non-zero dimensions
+*/
+
+document.addEventListener('DOMContentLoaded', () => {
+  // UI refs
+  const tabs = document.querySelectorAll('.tab');
+  const editorTab = document.querySelector('.tab[data-tab="editor"]');
+  const filesTab = document.querySelector('.tab[data-tab="files"]');
+  const cameraSelect = document.getElementById('cameraSelect');
+  const startBtn = document.getElementById('startBtn');
+  const stopBtn = document.getElementById('stopBtn');
+  const captureBtn = document.getElementById('captureBtn');
+  const autoChk = document.getElementById('autoChk');
+  const video = document.getElementById('video');
+  const overlay = document.getElementById('overlay');
+  const overlayCtx = overlay.getContext('2d');
+  const statusEl = document.getElementById('status');
+  const filesList = document.getElementById('filesList');
+  const refreshFiles = document.getElementById('refreshFiles');
+  const processBtn = document.getElementById('processBtn');
+  const consoleEl = document.getElementById('console');
+
+  // IndexedDB helpers
+  const DB = 'photosphere_min_db';
+  const STORE = 'shots';
+  function openDb() {
+    return new Promise((res, rej) => {
+      const r = indexedDB.open(DB, 1);
+      r.onupgradeneeded = () => {
+        const db = r.result;
+        if (!db.objectStoreNames.contains(STORE)) db.createObjectStore(STORE, { keyPath: 'id' });
+      };
+      r.onsuccess = () => res(r.result);
+      r.onerror = () => rej(r.error);
+    });
+  }
+  async function saveShot(id, blob) {
+    const db = await openDb();
+    return new Promise((res, rej) => {
+      const tx = db.transaction(STORE, 'readwrite');
+      tx.objectStore(STORE).put({ id, blob, ts: Date.now() });
+      tx.oncomplete = () => res();
+      tx.onerror = () => rej(tx.error);
+    });
+  }
+  async function listShots() {
+    const db = await openDb();
+    return new Promise((res, rej) => {
+      const out = [];
+      const tx = db.transaction(STORE, 'readonly');
+      const cur = tx.objectStore(STORE).openCursor();
+      cur.onsuccess = e => {
+        const c = e.target.result;
+        if (c) { out.push(c.value); c.continue(); } else res(out);
+      };
+      cur.onerror = () => rej(cur.error);
+    });
+  }
+  async function deleteShot(id) {
+    const db = await openDb();
+    return new Promise((res, rej) => {
+      const tx = db.transaction(STORE, 'readwrite');
+      tx.objectStore(STORE).delete(id);
+      tx.oncomplete = () => res();
+      tx.onerror = () => rej(tx.error);
+    });
+  }
+
+  // log helper (writes to console box)
+  function log(...args) {
+    const text = args.map(a => (typeof a === 'object' ? JSON.stringify(a) : String(a))).join(' ');
+    consoleEl.textContent += '\\n' + text;
+    consoleEl.scrollTop = consoleEl.scrollHeight;
+    console.log(...args);
+  }
+
+  // Tabs wiring
+  tabs.forEach(t => t.addEventListener('click', () => {
+    tabs.forEach(x => x.classList.remove('active'));
+    t.classList.add('active');
+    if (t.dataset.tab === 'editor') {
+      // nothing else — editor is default
+    } else {
+      // refresh files when switching to Files
+      renderFiles();
+    }
+  }));
+
+  // Camera enumeration
+  let devices = [];
+  async function enumerateDevices() {
+    try {
+      const all = await navigator.mediaDevices.enumerateDevices();
+      devices = all.filter(d => d.kind === 'videoinput');
+      cameraSelect.innerHTML = '';
+      if (devices.length === 0) {
+        const opt = document.createElement('option'); opt.text = 'No cameras found'; cameraSelect.add(opt);
+        statusEl.textContent = 'Status: No cameras found';
+        log('No cameras found');
+        return;
+      }
+      devices.forEach((d, i) => {
+        const opt = document.createElement('option');
+        opt.value = d.deviceId;
+        opt.text = d.label || `Camera ${i+1}`;
+        cameraSelect.add(opt);
+      });
+      const back = devices.findIndex(d => /back|rear|environment/i.test(d.label));
+      if (back >= 0) cameraSelect.selectedIndex = back;
+      statusEl.textContent = `${devices.length} camera(s) found`;
+      log('Devices:', devices);
+    } catch (e) {
+      log('enumerateDevices error', e);
+      statusEl.textContent = 'Status: Device enumeration failed (secure origin or permissions?)';
+    }
+  }
+
+  // Camera start / stop (robust)
+  let currentStream = null;
+  async function startCamera() {
+    const deviceId = cameraSelect.value;
+    try {
+      statusEl.textContent = 'Status: Requesting camera...';
+      // stop previous
+      stopCamera();
+      const constraints = deviceId ? { video: { deviceId: { exact: deviceId } } } : { video: { facingMode: { ideal: 'environment' } } };
+      currentStream = await navigator.mediaDevices.getUserMedia(constraints);
+      video.srcObject = currentStream;
+      await new Promise(resolve => {
+        let done = false;
+        function meta() { if (!done) { done = true; video.removeEventListener('loadedmetadata', meta); resolve(); } }
+        video.addEventListener('loadedmetadata', meta);
+        setTimeout(() => { if (!done) { done = true; resolve(); } }, 1500);
+      });
+      try { await video.play(); } catch (e) { log('video.play failed', e); }
+      // wait for dimensions
+      const ok = await waitForVideoDims(2500);
+      if (!ok) statusEl.textContent = 'Status: Camera running (dims not available)'; else statusEl.textContent = `Status: Camera running — ${video.videoWidth}x${video.videoHeight}`;
+      await enumerateDevices(); // update labels after permission
+      resizeOverlay();
+      startOverlay();
+      log('Camera started');
+    } catch (err) {
+      log('getUserMedia error', err.name || err, err.message || '');
+      if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') statusEl.textContent = 'Status: Permission denied — allow camera in site settings';
+      else statusEl.textContent = 'Status: Camera error: ' + (err.message || err.name);
+    }
+  }
+  function stopCamera() {
+    if (currentStream) {
+      for (const t of currentStream.getTracks()) t.stop();
+      currentStream = null;
+      video.srcObject = null;
+      statusEl.textContent = 'Status: Camera stopped';
+      log('Camera stopped');
+    }
+  }
+  function waitForVideoDims(timeout = 2000) {
+    return new Promise(res => {
+      const s = Date.now();
+      (function check() {
+        if (video.videoWidth > 0 && video.videoHeight > 0) return res(true);
+        if (Date.now() - s > timeout) return res(false);
+        setTimeout(check, 150);
+      })();
+    });
+  }
+
+  // overlay crosshair & small thumbnail in top-right
+  function resizeOverlay() {
+    overlay.width = video.clientWidth || video.videoWidth || window.innerWidth;
+    overlay.height = video.clientHeight || video.videoHeight || window.innerHeight;
+  }
+  window.addEventListener('resize', resizeOverlay);
+
+  let overlayRunning = false;
+  function startOverlay() {
+    if (overlayRunning) return;
+    overlayRunning = true;
+    (function loop() {
+      drawOverlay();
+      if (autoChk.checked) { /* auto-capture would be checked here */ }
+      requestAnimationFrame(loop);
+    })();
+  }
+
+  function drawOverlay() {
+    const w = overlay.width = video.clientWidth || video.videoWidth || overlay.width;
+    const h = overlay.height = video.clientHeight || video.videoHeight || overlay.height;
+    overlayCtx.clearRect(0,0,w,h);
+    overlayCtx.fillStyle = 'rgba(0,0,0,0.08)';
+    overlayCtx.fillRect(0,0,w,h);
+    // center crosshair
+    const cx = Math.round(w/2), cy = Math.round(h/2);
+    overlayCtx.strokeStyle = '#fff'; overlayCtx.lineWidth = 2;
+    overlayCtx.beginPath(); overlayCtx.moveTo(cx-30, cy); overlayCtx.lineTo(cx+30, cy); overlayCtx.moveTo(cx,cy-30); overlayCtx.lineTo(cx,cy+30); overlayCtx.stroke();
+    // small live thumbnail top-right
+    try {
+      const thumbW = Math.round(w * 0.18), thumbH = Math.round(thumbW * 0.6);
+      overlayCtx.drawImage(video, w - thumbW - 12, 12, thumbW, thumbH);
+      overlayCtx.strokeStyle = '#000'; overlayCtx.lineWidth = 2;
+      overlayCtx.strokeRect(w - thumbW - 12, 12, thumbW, thumbH);
+    } catch (e) { /* if video not ready */ }
+  }
+
+  // capture & store (saves as JPEG blob into IndexedDB)
+  async function captureShot() {
+    if (!currentStream) { statusEl.textContent = 'Status: Camera not running'; return; }
+    const cw = video.videoWidth || video.clientWidth || 1280;
+    const ch = video.videoHeight || video.clientHeight || 720;
+    const c = document.createElement('canvas'); c.width = cw; c.height = ch;
+    c.getContext('2d').drawImage(video, 0,0, cw, ch);
+    const blob = await new Promise(r => c.toBlob(r, 'image/jpeg', 0.92));
+    const id = 'shot_' + Date.now();
+    await saveShot(id, blob);
+    statusEl.textContent = 'Status: Shot saved as ' + id;
+    log('Saved', id);
+    renderFiles(); // update files in UI
+  }
+
+  // files UI
+  async function renderFiles() {
+    filesList.innerHTML = '<div class="small">Loading…</div>';
+    try {
+      const arr = await listShots();
+      filesList.innerHTML = '';
+      if (!arr || arr.length === 0) { filesList.innerHTML = '<div class="small">No saved files</div>'; return; }
+      for (const e of arr.reverse()) {
+        const row = document.createElement('div'); row.className = 'fileRow';
+        const img = document.createElement('img'); img.className = 'thumb'; img.src = URL.createObjectURL(e.blob);
+        const meta = document.createElement('div'); meta.innerHTML = `<div style="font-weight:700">${e.id}</div><div class="small">${new Date(e.ts).toLocaleString()}</div>`;
+        const btns = document.createElement('div'); btns.style.marginLeft = 'auto';
+        const open = document.createElement('button'); open.textContent = 'Open'; open.onclick = () => { window.open(img.src, '_blank'); };
+        const dl = document.createElement('button'); dl.textContent = 'Download'; dl.onclick = () => { const a = document.createElement('a'); a.href = img.src; a.download = e.id + '.jpg'; a.click(); };
+        const del = document.createElement('button'); del.textContent = 'Delete'; del.onclick = async () => { if (confirm('Delete?')) { await deleteShot(e.id); renderFiles(); } };
+        btns.append(open, dl, del);
+        row.append(img, meta, btns);
+        filesList.appendChild(row);
+      }
+    } catch (err) {
+      log('renderFiles error', err);
+      filesList.innerHTML = '<div class="small">Error loading files</div>';
+    }
+  }
+
+  // UI wiring
+  startBtn.addEventListener('click', async () => {
+    startBtn.disabled = true;
+    await startCamera();
+    startBtn.disabled = false;
+  });
+  stopBtn.addEventListener('click', stopCamera);
+  captureBtn.addEventListener('click', captureShot);
+  refreshFiles.addEventListener('click', renderFiles);
+  processBtn.addEventListener('click', async () => {
+    alert('Processing demo — in the full app this triggers the stitching pipeline. This minimal page saves raw shots only.');
+  });
+
+  // initial enumeration & render
+  enumerateDevices().then(() => log('Enumerated devices.')).catch(e => log('enumeration failed', e));
+  renderFiles();
+
+  // helpful logs & hints
+  log('Hints: serve via https:// or http://localhost, use Chrome on Android.');
+  log('If permission denied, open Chrome -> site settings -> Camera -> Allow, then reload.');
+});
+</script>
+</body>
+</html>
