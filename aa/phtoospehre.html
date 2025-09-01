@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>360 Photosphere App</title>
+<style>
+  body{margin:0;font-family:sans-serif;background:#111;color:#eee;display:flex;flex-direction:column;height:100vh;overflow:hidden;}
+  #tabs{display:flex;justify-content:space-around;background:#222;}
+  .tab{flex:1;padding:12px;text-align:center;cursor:pointer;user-select:none;}
+  .tab.active{background:#444;font-weight:bold;}
+  #editor,#files{flex:1;display:none;position:relative;overflow:hidden;}
+  #editor.active,#files.active{display:block;}
+  video{position:absolute;top:0;left:0;width:100%;height:100%;object-fit:cover;}
+  canvas{position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;}
+  #controls{position:absolute;bottom:10px;left:50%;transform:translateX(-50%);display:flex;gap:10px;}
+  button{padding:10px;font-size:14px;cursor:pointer;}
+  ul{list-style:none;padding:0;margin:0;overflow-y:auto;max-height:100%;}
+  li{margin:5px 0;background:#222;padding:5px;display:flex;justify-content:space-between;align-items:center;}
+  canvas#preview{position:absolute;top:0;left:0;width:100%;height:100%;}
+</style>
+</head>
+<body>
+
+<div id="tabs">
+  <div class="tab active" data-tab="editor">Editor</div>
+  <div class="tab" data-tab="files">Files</div>
+</div>
+
+<div id="editor" class="active">
+  <video id="camera" autoplay playsinline></video>
+  <canvas id="overlay"></canvas>
+  <canvas id="preview"></canvas>
+  <div id="controls">
+    <button id="captureBtn">Capture Point</button>
+    <button id="finishBtn">Finish & Process</button>
+  </div>
+</div>
+
+<div id="files">
+  <ul id="photosphereList"></ul>
+</div>
+
+<script type="module">
+import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.162.0/build/three.module.js';
+
+// --- Tab Handling ---
+const tabs = document.querySelectorAll('.tab');
+const editor = document.getElementById('editor');
+const filesTab = document.getElementById('files');
+tabs.forEach(tab=>tab.onclick=()=>{
+  tabs.forEach(t=>t.classList.remove('active'));
+  tab.classList.add('active');
+  editor.classList.remove('active');
+  filesTab.classList.remove('active');
+  if(tab.dataset.tab==='editor') editor.classList.add('active');
+  else filesTab.classList.add('active');
+});
+
+// --- Camera Setup ---
+let cameraStream = await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment'},audio:false});
+const video = document.getElementById('camera');
+video.srcObject = cameraStream;
+
+// --- Overlay Guide Points ---
+const overlay = document.getElementById('overlay');
+const ctx = overlay.getContext('2d');
+
+const guidePoints=[
+  {yaw:0,pitch:0,name:'front'},{yaw:90,pitch:0,name:'right'},{yaw:180,pitch:0,name:'back'},{yaw:270,pitch:0,name:'left'},
+  {yaw:45,pitch:45,name:'up-right'},{yaw:135,pitch:45,name:'up-left'},{yaw:225,pitch:45,name:'up-back-left'},{yaw:315,pitch:45,name:'up-front-left'},
+  {yaw:0,pitch:45,name:'up-front'},{yaw:90,pitch:45,name:'up-right'},{yaw:180,pitch:45,name:'up-back'},{yaw:270,pitch:45,name:'up-left'},
+  {yaw:45,pitch:-45,name:'down-front-right'},{yaw:135,pitch:-45,name:'down-front-left'},{yaw:225,pitch:-45,name:'down-back-left'},{yaw:315,pitch:-45,name:'down-back-right'},
+  {yaw:0,pitch:-45,name:'down-front'},{yaw:90,pitch:-45,name:'down-right'},{yaw:180,pitch:-45,name:'down-back'},{yaw:270,pitch:-45,name:'down-left'},
+  {yaw:45,pitch:0,name:'diag-right'},{yaw:135,pitch:0,name:'diag-left'},{yaw:225,pitch:0,name:'diag-back-left'},{yaw:315,pitch:0,name:'diag-back-right'},{yaw:0,pitch:90,name:'up'}
+];
+
+let capturedImages=[];
+let currentPoint=0;
+
+const drawOverlay=()=>{
+  overlay.width=video.videoWidth; overlay.height=video.videoHeight;
+  ctx.clearRect(0,0,overlay.width,overlay.height);
+  guidePoints.forEach((p,i)=>{
+    const done = i<capturedImages.length;
+    const x = overlay.width/2 + Math.cos(p.yaw*Math.PI/180)*100;
+    const y = overlay.height/2 - Math.sin(p.pitch*Math.PI/180)*100;
+    ctx.beginPath();
+    ctx.arc(x,y,10,0,2*Math.PI);
+    ctx.fillStyle=done?'green':'red';
+    ctx.fill();
+    ctx.fillStyle='#fff';
+    ctx.font='12px sans-serif';
+    ctx.fillText(p.name,x+12,y);
+  });
+};
+video.addEventListener('play',()=>{ setInterval(drawOverlay,100); });
+
+// --- Capture ---
+document.getElementById('captureBtn').onclick=()=>{
+  const c=document.createElement('canvas');
+  c.width=video.videoWidth;c.height=video.videoHeight;
+  c.getContext('2d').drawImage(video,0,0);
+  capturedImages.push(c.toDataURL('image/jpeg',0.9));
+  alert(`Captured ${guidePoints[capturedImages.length-1].name}`);
+};
+
+// --- Three.js Setup ---
+const previewCanvas = document.getElementById('preview');
+const scene = new THREE.Scene();
+const camera3D = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight,0.1,1000);
+const renderer = new THREE.WebGLRenderer({canvas:previewCanvas,antialias:true});
+renderer.setSize(window.innerWidth,window.innerHeight);
+camera3D.position.set(0,0,0);
+const sphereGeo = new THREE.SphereGeometry(5,64,64);
+sphereGeo.scale(-1,1,1);
+let sphereMesh;
+
+// --- Post-Processing / Stitching ---
+const finishProcessing = ()=>{
+  if(capturedImages.length===0){ alert('No images captured'); return; }
+
+  // Offscreen canvas for stitching
+  const off = document.createElement('canvas');
+  const ctxOff = off.getContext('2d');
+  off.width = 2048; off.height = 1024; // final equirectangular
+
+  capturedImages.forEach(imgData=>{
+    const img = new Image();
+    img.src = imgData;
+    img.onload = ()=>{ ctxOff.globalAlpha=0.5; ctxOff.drawImage(img,0,0,off.width,off.height); }
+  });
+
+  const finalData = off.toDataURL('image/jpeg',0.9);
+
+  if(sphereMesh) scene.remove(sphereMesh);
+  const tex = new THREE.TextureLoader().load(finalData);
+  sphereMesh = new THREE.Mesh(sphereGeo,new THREE.MeshBasicMaterial({map:tex}));
+  scene.add(sphereMesh);
+
+  localStorage.setItem('photosphere_'+Date.now(),finalData);
+  updateFileList();
+  capturedImages=[]; alert('Photosphere processed and saved!');
+};
+document.getElementById('finishBtn').onclick=finishProcessing;
+
+// --- Local Storage File Management ---
+const updateFileList=()=>{
+  const list=document.getElementById('photosphereList');
+  list.innerHTML='';
+  Object.keys(localStorage).filter(k=>k.startsWith('photosphere_')).forEach(k=>{
+    const li=document.createElement('li');
+    li.textContent=k;
+    const btnPreview=document.createElement('button');
+    btnPreview.textContent='Preview';
+    btnPreview.onclick=()=>{
+      const data = localStorage.getItem(k);
+      if(data){
+        const tex = new THREE.TextureLoader().load(data);
+        if(sphereMesh) scene.remove(sphereMesh);
+        sphereMesh = new THREE.Mesh(sphereGeo,new THREE.MeshBasicMaterial({map:tex}));
+        scene.add(sphereMesh);
+        tabs.forEach(t=>t.classList.remove('active'));
+        document.querySelector('.tab[data-tab="editor"]').classList.add('active');
+        editor.classList.add('active');
+        filesTab.classList.remove('active');
+      }
+    };
+    const btnDelete=document.createElement('button');
+    btnDelete.textContent='Delete';
+    btnDelete.onclick=()=>{ localStorage.removeItem(k); updateFileList(); };
+    const btnDownload=document.createElement('button');
+    btnDownload.textContent='Download';
+    btnDownload.onclick=()=>{ const a=document.createElement('a'); a.href=localStorage.getItem(k); a.download=k+'.jpg'; a.click(); };
+    li.appendChild(btnPreview); li.appendChild(btnDownload); li.appendChild(btnDelete);
+    list.appendChild(li);
+  });
+};
+updateFileList();
+
+// --- Phone Orientation for VR Viewing ---
+window.addEventListener('deviceorientation',(e)=>{
+  if(sphereMesh){
+    const alpha = THREE.MathUtils.degToRad(e.alpha||0);
+    const beta = THREE.MathUtils.degToRad(e.beta||0);
+    const gamma = THREE.MathUtils.degToRad(e.gamma||0);
+    const euler = new THREE.Euler(beta,gamma,alpha,'YXZ');
+    camera3D.quaternion.setFromEuler(euler);
+  }
+});
+
+// --- Animation Loop ---
+function animate(){
+  requestAnimationFrame(animate);
+  renderer.render(scene,camera3D);
+}
+animate();
+
+// --- Handle resize ---
+window.addEventListener('resize',()=>{
+  camera3D.aspect = window.innerWidth/window.innerHeight;
+  camera3D.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth,window.innerHeight);
+});
+</script>
+
+</body>
+</html>
+
