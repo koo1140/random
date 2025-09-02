@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>WebXR AR Demo</title>
+<style>
+  body { margin:0; overflow:hidden; }
+  #enter-ar { position:absolute; top:10px; left:10px; padding:10px 20px; font-size:16px; z-index:10; }
+</style>
+</head>
+<body>
+<button id="enter-ar">Enter AR</button>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.154.0/build/three.module.js",
+    "OrbitControls": "https://unpkg.com/three@0.154.0/examples/jsm/controls/OrbitControls.js"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from "three";
+
+// --- Scene setup ---
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera();
+const renderer = new THREE.WebGLRenderer({antialias:true, alpha:true});
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.xr.enabled = true;
+renderer.xr.setReferenceSpaceType('local');
+document.body.appendChild(renderer.domElement);
+
+// --- World-fixed cube ---
+const cube = new THREE.Mesh(new THREE.BoxGeometry(0.3,0.3,0.3), new THREE.MeshNormalMaterial());
+cube.position.set(0,0,-1); // 1 meter in front of user
+scene.add(cube);
+
+// --- Enter AR button ---
+const enterARButton = document.getElementById('enter-ar');
+enterARButton.onclick = async () => {
+  if (navigator.xr) {
+    const session = await navigator.xr.requestSession('immersive-ar', { requiredFeatures: ['local-floor'] });
+    renderer.xr.setSession(session);
+    enterARButton.style.display = 'none';
+  } else {
+    alert("WebXR not supported on this device.");
+  }
+};
+
+// --- Animation loop ---
+renderer.setAnimationLoop((time, frame) => {
+  renderer.render(scene, camera);
+});
+</script>
+</body>
+</html>
