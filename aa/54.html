@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AR Photo Scanner</title>
+<style>
+  body { margin:0; overflow:hidden; background:#333; } /* dark gray background */
+  #startAR, #takePhoto {
+    position:absolute;
+    padding:10px 20px;
+    font-size:16px;
+    z-index:10;
+    border:none;
+    border-radius:5px;
+    color:white;
+  }
+  #startAR { top:50%; left:50%; transform:translate(-50%,-50%); background:#444; }
+  #takePhoto { bottom:20px; left:50%; transform:translateX(-50%); background:green; display:none; }
+</style>
+</head>
+<body>
+<button id="startAR">Start AR</button>
+<button id="takePhoto">Take Photo</button>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.154.0/build/three.module.js"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from "three";
+
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera();
+const renderer = new THREE.WebGLRenderer({antialias:true, alpha:true});
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.xr.enabled = true;
+renderer.xr.setReferenceSpaceType('local');
+document.body.appendChild(renderer.domElement);
+
+// --- Video feed setup (hidden) ---
+const video = document.createElement('video');
+video.autoplay = true;
+video.playsInline = true;
+video.style.display = 'none';
+document.body.appendChild(video);
+
+navigator.mediaDevices.getUserMedia({video:{facingMode:"environment"}})
+.then(stream=>{ video.srcObject = stream; })
+.catch(err=>{ console.error(err); });
+
+// --- Buttons ---
+const startButton = document.getElementById('startAR');
+const takePhotoButton = document.getElementById('takePhoto');
+
+startButton.onclick = async ()=>{
+  if(!navigator.xr){ alert("WebXR not supported"); return; }
+  const session = await navigator.xr.requestSession('immersive-ar',{requiredFeatures:['local-floor']});
+  renderer.xr.setSession(session);
+
+  startButton.style.display = 'none';
+  takePhotoButton.style.display = 'block';
+};
+
+// --- Take photo ---
+takePhotoButton.onclick = ()=>{
+  if(!video.videoWidth) return;
+
+  const canvas = document.createElement('canvas');
+  canvas.width = video.videoWidth;
+  canvas.height = video.videoHeight;
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(video,0,0,canvas.width,canvas.height);
+
+  const texture = new THREE.Texture(canvas);
+  texture.needsUpdate = true;
+
+  const aspect = canvas.width/canvas.height;
+  const height = 1; // 1 meter
+  const width = height * aspect;
+  const geometry = new THREE.PlaneGeometry(width,height);
+  const material = new THREE.MeshBasicMaterial({map:texture, side:THREE.DoubleSide});
+  const plane = new THREE.Mesh(geometry, material);
+
+  const xrCamera = renderer.xr.getCamera(camera);
+  plane.position.copy(xrCamera.position);
+  plane.quaternion.copy(xrCamera.quaternion);
+
+  scene.add(plane);
+}
+
+// --- Render loop ---
+renderer.setAnimationLoop(()=>{
+  renderer.render(scene, camera);
+});
+</script>
+</body>
+</html>
