@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Handpose Debug AR</title>
+<style>
+  body { margin:0; overflow:hidden; font-family:sans-serif; background:#111; color:#eee;}
+  #startButton, #copyLogs { position:absolute; top:20px; padding:10px 20px; font-size:16px; z-index:10; cursor:pointer; }
+  #startButton { left:20px; }
+  #copyLogs { left:150px; }
+  #logs { position:absolute; bottom:0; left:0; width:100%; max-height:40%; overflow:auto; background:rgba(0,0,0,0.8); padding:10px; font-size:12px; }
+</style>
+</head>
+<body>
+
+<button id="startButton">Start AR</button>
+<button id="copyLogs">Copy Logs</button>
+<video id="video" autoplay playsinline style="display:none;"></video>
+<div id="logs"></div>
+
+<script type="module">
+import * as THREE from 'https://unpkg.com/three@0.154.0/build/three.module.js';
+import * as handpose from 'https://cdn.jsdelivr.net/npm/@tensorflow-models/handpose/dist/handpose.min.js';
+import '@tensorflow/tfjs-backend-webgl';
+
+const logContainer = document.getElementById('logs');
+function log(msg){ 
+    console.log(msg); 
+    logContainer.innerHTML += msg+'<br>'; 
+    logContainer.scrollTop = logContainer.scrollHeight;
+}
+
+document.getElementById('copyLogs').onclick = ()=>{ 
+    navigator.clipboard.writeText(logContainer.innerText).then(()=>log('Logs copied')); 
+};
+
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(70, window.innerWidth/window.innerHeight, 0.01, 10);
+camera.position.z = 0.5;
+const renderer = new THREE.WebGLRenderer({antialias:true, alpha:true});
+renderer.setSize(window.innerWidth, window.innerHeight);
+document.body.appendChild(renderer.domElement);
+
+const video = document.getElementById('video');
+const startButton = document.getElementById('startButton');
+
+let jointSpheres = [];
+let boneLines = [];
+const jointGeom = new THREE.SphereGeometry(0.01,8,8);
+const jointMat = new THREE.MeshNormalMaterial();
+const boneMat = new THREE.LineBasicMaterial({color:0x00ff00});
+const fingers = [
+    [0,1,2,3,4],[0,5,6,7,8],[0,9,10,11,12],[0,13,14,15,16],[0,17,18,19,20]
+];
+
+let model;
+
+// Start button
+startButton.onclick = async ()=>{
+    startButton.style.display='none';
+    try{
+        log('Requesting camera...');
+        const stream = await navigator.mediaDevices.getUserMedia({video:{facingMode:"environment"}});
+        video.srcObject = stream;
+        await video.play();
+        log('Camera started.');
+
+        log('Setting TensorFlow backend...');
+        await tf.setBackend('webgl');
+
+        log('Loading handpose model...');
+        model = await handpose.load();
+        log('Handpose model loaded.');
+
+        detectHands();
+    }catch(e){
+        log('Error: '+e);
+    }
+};
+
+// Hand detection loop
+async function detectHands(){
+    try{
+        if(!model || video.readyState < 2){
+            requestAnimationFrame(detectHands);
+            return;
+        }
+
+        const predictions = await model.estimateHands(video, true);
+
+        jointSpheres.forEach(s=>scene.remove(s)); jointSpheres=[];
+        boneLines.forEach(l=>scene.remove(l)); boneLines=[];
+
+        if(predictions.length>0){
+            log('Hands detected: '+predictions.length);
+        }
+
+        predictions.forEach(hand=>{
+            const landmarks = hand.landmarks;
+            landmarks.forEach(lm=>{
+                const sphere = new THREE.Mesh(jointGeom,jointMat);
+                sphere.position.set((lm[0]/video.videoWidth-0.5)*0.5, (0.5-lm[1]/video.videoHeight)*0.5, -lm[2]*0.5);
+                scene.add(sphere); jointSpheres.push(sphere);
+            });
+            fingers.forEach(finger=>{
+                for(let i=0;i<finger.length-1;i++){
+                    const a=landmarks[finger[i]], b=landmarks[finger[i+1]];
+                    const points=[
+                        new THREE.Vector3((a[0]/video.videoWidth-0.5)*0.5,(0.5-a[1]/video.videoHeight)*0.5,-a[2]*0.5),
+                        new THREE.Vector3((b[0]/video.videoWidth-0.5)*0.5,(0.5-b[1]/video.videoHeight)*0.5,-b[2]*0.5)
+                    ];
+                    const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints(points), boneMat);
+                    scene.add(line); boneLines.push(line);
+                }
+            });
+        });
+
+    }catch(e){ log('Detection error: '+e); }
+    requestAnimationFrame(detectHands);
+}
+
+// Render loop
+renderer.setAnimationLoop(()=>renderer.render(scene,camera));
+
+</script>
+</body>
+</html>
