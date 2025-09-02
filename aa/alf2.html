@@ -1,0 +1,231 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1" />
+<title>Live 3D Room Scanner (static)</title>
+<script type="importmap">{
+  "imports": {
+    "three": "https://unpkg.com/three@0.154.0/build/three.module.js",
+    "three/": "https://unpkg.com/three@0.154.0/"
+  }
+}</script>
+<style>
+html,body{height:100%;margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto;overflow:auto}
+#ui{position:relative;z-index:9;background:rgba(255,255,255,0.95);padding:10px;border-bottom:2px solid #ccc}
+button,input,select{display:block;margin:6px 0;width:100%}
+canvas{display:block}
+</style>
+</head>
+<body>
+<div id="ui">
+  <strong>Live 3D Room Scanner</strong>
+  <label>Photosphere (equirectangular JPG/PNG): <input id="imgfile" type="file" accept="image/*"></label>
+  <label>Ceiling height (m): <input id="ceiling" type="number" value="2.6" step="0.05"></label>
+  <div style="display:flex;gap:6px"><button id="start">START (set origin)</button><button id="calib">Calibrate floor here</button></div>
+  <button id="addFloor">ADD FLOOR POINT</button>
+  <button id="autoCeil">ADD 4 CEILING POINTS (over floor)</button>
+  <label>Depth for scan point (m): <input id="depth" type="range" min="0.2" max="6" step="0.1" value="2"><span id="dval">2.0</span>m</label>
+  <button id="addScan">ADD SCAN POINT</button>
+  <button id="finish">FINISH & VISUALIZE</button>
+  <hr>
+  <div id="status">Status: idle</div>
+  <small>Best on mobile Chrome/Firefox. Sensors may drift — use corners to anchor.</small>
+</div>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
+
+let scene = new THREE.Scene();
+let camera = new THREE.PerspectiveCamera(60,innerWidth/innerHeight,0.01,200);
+camera.position.set(0,1.6,3);
+let renderer = new THREE.WebGLRenderer({antialias:true});
+renderer.setSize(innerWidth,innerHeight);document.body.appendChild(renderer.domElement);
+let controls = new OrbitControls(camera, renderer.domElement);
+controls.target.set(0,1,0);
+
+// helpers
+let grid = new THREE.GridHelper(10,20,'#888','#444'); scene.add(grid);
+let axes = new THREE.AxesHelper(1.5); scene.add(axes);
+
+// point cloud and geometry
+let pointsGeom = new THREE.BufferGeometry();
+let pointsMaterial = new THREE.PointsMaterial({size:0.06});
+let pointsMesh = new THREE.Points(pointsGeom, pointsMaterial); scene.add(pointsMesh);
+let scanPoints = [];
+let floorPts = [];
+let ceilingPts = [];
+let floorLine = null;
+let ceilingLine = null;
+
+// camera representation (device pose) in scene
+let camHelper = new THREE.Group();
+let camFrust = new THREE.Mesh(new THREE.BoxGeometry(0.05,0.03,0.08), new THREE.MeshBasicMaterial({wireframe:true}));
+camFrust.position.set(0,0, -0.04); camHelper.add(camFrust);
+let camDir = new THREE.ArrowHelper(new THREE.Vector3(0,0,-1), new THREE.Vector3(0,0,0), 0.5); camHelper.add(camDir);
+scene.add(camHelper);
+
+// photosphere
+let pano = null;
+
+// sensor fusion state
+let state = {
+  running:false,
+  pos: new THREE.Vector3(0,0,0), // meters in local origin
+  vel: new THREE.Vector3(0,0,0),
+  quat: new THREE.Quaternion(),
+  lastTs: null,
+  gravity: new THREE.Vector3(0, -9.81, 0),
+  floorY: 0
+};
+
+function setStatus(t){document.getElementById('status').innerText = 'Status: '+t}
+
+// DeviceOrientation -> quaternion (adjusted so back-of-phone matches forward)
+function handleOri(e){
+  let alpha = (e.alpha||0) * Math.PI/180;
+  let beta = (e.beta||0) * Math.PI/180;
+  let gamma = (e.gamma||0) * Math.PI/180;
+  let q = new THREE.Quaternion();
+  q.setFromEuler(new THREE.Euler(beta, alpha, -gamma, 'YXZ'));
+  // rotate 180° around Y to switch from screen-facing to back-facing
+  let fix = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,1,0), Math.PI);
+  q.multiply(fix);
+  state.quat.copy(q);
+}
+
+// integrate acceleration -> position (very approximate)
+function handleMotion(e){
+  if(!state.running) return;
+  let ts = performance.now();
+  if(state.lastTs==null) state.lastTs = ts;
+  let dt = (ts - state.lastTs)/1000; if(dt>0.2) dt = 0.02;
+  state.lastTs = ts;
+  let acc = e.acceleration || e.accelerationIncludingGravity || {x:0,y:0,z:0};
+  let a = new THREE.Vector3(acc.x||0, acc.y||0, acc.z||0);
+  let worldA = a.clone().applyQuaternion(state.quat);
+  worldA.sub(state.gravity.clone().set(0,-9.81,0));
+  worldA.multiplyScalar(0.5);
+  state.vel.addScaledVector(worldA, dt);
+  state.vel.multiplyScalar(0.995);
+  state.pos.addScaledVector(state.vel, dt);
+}
+
+window.addEventListener('deviceorientation', handleOri, true);
+window.addEventListener('devicemotion', handleMotion, true);
+
+// UI handlers
+let startBtn = document.getElementById('start');
+let addFloorBtn = document.getElementById('addFloor');
+let autoCeilBtn = document.getElementById('autoCeil');
+let addScanBtn = document.getElementById('addScan');
+let finishBtn = document.getElementById('finish');
+let calibBtn = document.getElementById('calib');
+let depthInput = document.getElementById('depth'); let dval = document.getElementById('dval');
+let ceilingInput = document.getElementById('ceiling');
+
+depthInput.addEventListener('input', ()=>dval.innerText = depthInput.value);
+
+startBtn.onclick = ()=>{
+  state.running = true; state.pos.set(0,0,0); state.vel.set(0,0,0); state.lastTs = null;
+  setStatus('running — origin set to current device pose');
+}
+
+calibBtn.onclick = ()=>{
+  state.floorY = state.pos.y;
+  setStatus('floor calibrated to y=' + state.floorY.toFixed(2) + ' m');
+}
+
+addFloorBtn.onclick = ()=>{
+  let p = state.pos.clone(); p.y = state.floorY;
+  floorPts.push(p.clone()); updateFloorLines(); setStatus('added floor point');
+}
+
+autoCeilBtn.onclick = ()=>{
+  let h = parseFloat(ceilingInput.value)||2.6;
+  ceilingPts = [];
+  for(let i=0;i<4;i++){
+    let f = floorPts[i] || new THREE.Vector3((i%2?1:-1),(state.floorY), (i<2? -1:1));
+    let c = f.clone(); c.y = state.floorY + h; ceilingPts.push(c);
+  }
+  updateCeilingLines(); setStatus('added ceiling points at height '+h+'m');
+}
+
+addScanBtn.onclick = ()=>{
+  let depth = parseFloat(depthInput.value);
+  let dir = new THREE.Vector3(0,0,-1).applyQuaternion(state.quat).normalize();
+  let worldPos = state.pos.clone().addScaledVector(dir, depth);
+  scanPoints.push(worldPos.clone()); updatePoints(); setStatus('scan point added');
+}
+
+finishBtn.onclick = ()=>{
+  setStatus('finished. You can orbit and inspect. Export not implemented.');
+}
+
+let imgFile = document.getElementById('imgfile');
+imgFile.onchange = async (ev)=>{
+  let file = ev.target.files[0]; if(!file) return;
+  let url = URL.createObjectURL(file);
+  if(pano){ scene.remove(pano); pano.geometry.dispose(); pano.material.dispose(); pano=null; }
+  let tex = new THREE.TextureLoader().load(url, ()=>{renderer.render(scene,camera);});
+  tex.mapping = THREE.EquirectangularReflectionMapping;
+  let geo = new THREE.SphereGeometry(1.0, 32, 32);
+  geo.scale(-1,1,1);
+  let mat = new THREE.MeshBasicMaterial({map:tex});
+  pano = new THREE.Mesh(geo, mat);
+  scene.add(pano);
+  setStatus('photosphere loaded — will appear around its capture point when placed');
+}
+
+function updatePoints(){
+  let arr = [];
+  for(let p of scanPoints){ arr.push(p.x,p.y,p.z); }
+  pointsGeom.setAttribute('position', new THREE.Float32BufferAttribute(arr,3));
+  pointsGeom.computeBoundingSphere();
+}
+
+function updateFloorLines(){
+  if(floorLine) scene.remove(floorLine);
+  if(floorPts.length<2) return;
+  let g = new THREE.BufferGeometry(); let verts=[];
+  for(let p of floorPts){ verts.push(p.x,p.y,p.z); }
+  if(floorPts.length>=3){ verts.push(floorPts[0].x,floorPts[0].y,floorPts[0].z); }
+  g.setAttribute('position', new THREE.Float32BufferAttribute(verts,3));
+  floorLine = new THREE.Line(g, new THREE.LineBasicMaterial({linewidth:2})); scene.add(floorLine);
+}
+
+function updateCeilingLines(){
+  if(ceilingLine) scene.remove(ceilingLine);
+  if(ceilingPts.length<2) return;
+  let g = new THREE.BufferGeometry(); let verts=[];
+  for(let p of ceilingPts){ verts.push(p.x,p.y,p.z); }
+  if(ceilingPts.length>=3){ verts.push(ceilingPts[0].x,ceilingPts[0].y,ceilingPts[0].z); }
+  ceilingLine = new THREE.Line(g, new THREE.LineBasicMaterial({linewidth:2})); scene.add(ceilingLine);
+}
+
+function animate(){
+  requestAnimationFrame(animate);
+  camHelper.position.copy(state.pos);
+  camHelper.quaternion.copy(state.quat);
+  camDir.setDirection(new THREE.Vector3(0,0,-1).applyQuaternion(state.quat));
+  if(pano){ pano.position.copy(state.pos); pano.scale.setScalar(0.8); pano.visible = false; }
+  renderer.render(scene,camera);
+}
+animate();
+
+window.addEventListener('resize', ()=>{camera.aspect = innerWidth/innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth,innerHeight);});
+
+renderer.domElement.addEventListener('click', ()=>{
+  if(!pano) return;
+  pano.position.copy(state.pos);
+  pano.visible = true; pano.scale.setScalar(1.5);
+  setStatus('photosphere placed at current device position');
+});
+
+if(!('ontouchstart' in window)){
+  setStatus('Desktop: you can still test with orientation simulators. Best experience on mobile.');
+}
+
+</script>
+</body>
+</html>
