@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>WebXR Hand Visualization</title>
+<style>
+  body { margin:0; overflow:hidden; }
+  #startButton { position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); padding:12px 24px; font-size:16px; z-index:10; }
+</style>
+</head>
+<body>
+
+<button id="startButton">Start AR</button>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.154.0/build/three.module.js"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera();
+const renderer = new THREE.WebGLRenderer({antialias:true, alpha:true});
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.xr.enabled = true;
+renderer.xr.setReferenceSpaceType('local');
+document.body.appendChild(renderer.domElement);
+
+const startButton = document.getElementById('startButton');
+
+startButton.onclick = async () => {
+    if(!navigator.xr){ alert("WebXR not supported"); return; }
+
+    const session = await navigator.xr.requestSession('immersive-ar', {
+        optionalFeatures: ['hand-tracking','local-floor']
+    });
+    renderer.xr.setSession(session);
+    startButton.style.display = 'none';
+
+    // Create joint spheres and bone lines containers
+    const jointSpheres = [];
+    const boneLines = [];
+
+    const jointMaterial = new THREE.MeshNormalMaterial();
+    const boneMaterial = new THREE.LineBasicMaterial({color:0x00ff00});
+
+    const jointGeometry = new THREE.SphereGeometry(0.01,8,8);
+
+    // Bones connections: simple finger connections (wrist -> metacarpal -> phalanges -> tip)
+    const fingerBones = [
+        ["wrist","thumb-metacarpal","thumb-phalanx-proximal","thumb-phalanx-distal","thumb-tip"],
+        ["wrist","index-finger-metacarpal","index-finger-phalanx-proximal","index-finger-phalanx-intermediate","index-finger-phalanx-distal","index-finger-tip"],
+        ["wrist","middle-finger-metacarpal","middle-finger-phalanx-proximal","middle-finger-phalanx-intermediate","middle-finger-phalanx-distal","middle-finger-tip"],
+        ["wrist","ring-finger-metacarpal","ring-finger-phalanx-proximal","ring-finger-phalanx-intermediate","ring-finger-phalanx-distal","ring-finger-tip"],
+        ["wrist","pinky-finger-metacarpal","pinky-finger-phalanx-proximal","pinky-finger-phalanx-intermediate","pinky-finger-phalanx-distal","pinky-finger-tip"]
+    ];
+
+    renderer.setAnimationLoop(() => {
+        const xrCamera = renderer.xr.getCamera(camera);
+        const session = renderer.xr.getSession();
+
+        // Remove previous joints and bones
+        jointSpheres.forEach(s=>scene.remove(s));
+        jointSpheres.length = 0;
+        boneLines.forEach(l=>scene.remove(l));
+        boneLines.length = 0;
+
+        if(session){
+            session.inputSources.forEach(inputSource => {
+                if(inputSource.hand){
+                    const jointsMap = inputSource.hand;
+
+                    // Draw joints
+                    jointsMap.forEach((joint,jointName)=>{
+                        const pose = joint.getPose(renderer.xr.getReferenceSpace());
+                        if(pose){
+                            const sphere = new THREE.Mesh(jointGeometry,jointMaterial);
+                            sphere.position.fromArray(pose.transform.position);
+                            scene.add(sphere);
+                            jointSpheres.push(sphere);
+                        }
+                    });
+
+                    // Draw bones
+                    fingerBones.forEach(finger=>{
+                        for(let i=0;i<finger.length-1;i++){
+                            const j1 = jointsMap.get(finger[i]);
+                            const j2 = jointsMap.get(finger[i+1]);
+                            if(j1 && j2){
+                                const p1 = j1.getPose(renderer.xr.getReferenceSpace());
+                                const p2 = j2.getPose(renderer.xr.getReferenceSpace());
+                                if(p1 && p2){
+                                    const points = [];
+                                    points.push(new THREE.Vector3().fromArray(p1.transform.position));
+                                    points.push(new THREE.Vector3().fromArray(p2.transform.position));
+                                    const lineGeom = new THREE.BufferGeometry().setFromPoints(points);
+                                    const line = new THREE.Line(lineGeom,boneMaterial);
+                                    scene.add(line);
+                                    boneLines.push(line);
+                                }
+                            }
+                        }
+                    });
+                }
+            });
+        }
+
+        renderer.render(scene,camera);
+    });
+};
+</script>
+</body>
+</html>
