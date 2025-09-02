@@ -1,0 +1,575 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Photosphere Maps — Fixed (no duplicates, emojis)</title>
+<style>
+  :root{
+    --bg:#0f1113; --panel:#121416; --accent:#00bfa6; --muted:#8b9297;
+    --ui-h:84px;
+  }
+  html,body{height:100%;margin:0;background:var(--bg);color:#fff;font-family:Inter,system-ui,Segoe UI,Roboto,Arial}
+  header{position:fixed;left:0;right:0;top:0;height:56px;padding:8px 12px;display:flex;align-items:center;gap:12px;background:linear-gradient(180deg, rgba(0,0,0,0.25), rgba(0,0,0,0.0));z-index:90}
+  header h1{font-size:16px;margin:0;font-weight:600;display:flex;gap:8px;align-items:center}
+  .top-actions{margin-left:auto;display:flex;gap:8px;align-items:center}
+  .btn{background:transparent;border:0;color:#fff;padding:8px 12px;border-radius:10px;font-size:14px;cursor:pointer}
+  .btn.primary{background:var(--accent);color:#021}
+  main{position:fixed;inset:56px 0 var(--ui-h) 0;display:block;overflow:hidden}
+  .page{width:100%;height:100%;display:none}
+  .page.active{display:block}
+  nav#bottom{position:fixed;left:0;right:0;bottom:0;height:var(--ui-h);display:flex;align-items:center;gap:0;background:linear-gradient(0deg, rgba(0,0,0,0.6), rgba(0,0,0,0.3));z-index:95}
+  nav button{flex:1;border:0;background:none;color:#fff;font-size:14px;padding:10px;display:flex;flex-direction:column;align-items:center;gap:4px;cursor:pointer}
+  nav button.active{background:rgba(255,255,255,0.03)}
+  #fab{position:fixed;right:14px;bottom:calc(var(--ui-h) + 18px);width:64px;height:64px;border-radius:32px;background:var(--accent);display:flex;align-items:center;justify-content:center;color:#021;font-weight:700;font-size:28px;box-shadow:0 8px 20px rgba(0,0,0,0.5);z-index:120;cursor:pointer}
+  #mapWrap{width:100%;height:100%;background:#222;display:flex;align-items:stretch;justify-content:stretch}
+  #mapCanvas{flex:1;touch-action:none;background:#2b2e30}
+  #inspector{width:320px;background:linear-gradient(180deg,var(--panel),#0f1113);border-left:1px solid rgba(255,255,255,0.03);padding:12px;box-sizing:border-box;overflow:auto}
+  .thumb{width:96px;height:64px;border-radius:6px;object-fit:cover;background:#111;display:block}
+  .muted{color:var(--muted);font-size:13px}
+  #viewerCanvas{width:100%;height:100%;background:#111;display:block;touch-action:none}
+  .viewer-ui{position:absolute;left:12px;top:68px;z-index:120}
+  .viewer-bottom{position:absolute;left:12px;right:12px;bottom:96px;display:flex;justify-content:center;gap:12px;z-index:120}
+  .pill{padding:8px 12px;background:rgba(0,0,0,0.45);border-radius:999px;border:1px solid rgba(255,255,255,0.04)}
+  .linkOverlay{position:absolute;left:50%;transform:translateX(-50%);top:70px;background:rgba(0,0,0,0.85);padding:8px;border-radius:8px;display:flex;gap:8px;z-index:200}
+  .linkThumb{width:64px;height:42px;object-fit:cover;border-radius:6px;border:2px solid rgba(255,255,255,0.05);cursor:pointer}
+  @media (max-width:900px){#inspector{display:none}}
+</style>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.154.0/build/three.module.js"
+  }
+}
+</script>
+</head>
+<body>
+<header>
+  <h1><span>📷</span> Photosphere Maps</h1>
+  <div class="top-actions">
+    <button id="btnSave" class="btn">💾 Save</button>
+    <button id="btnExport" class="btn">📤 Export</button>
+    <button id="btnImport" class="btn">📥 Import</button>
+  </div>
+</header>
+
+<main>
+  <section id="mapPage" class="page active">
+    <div id="mapWrap" style="display:flex;flex-direction:row;height:100%">
+      <canvas id="mapCanvas"></canvas>
+      <aside id="inspector">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <div>
+            <strong id="mapName">Untitled map</strong>
+            <div class="muted" id="mapMeta">0 photospheres</div>
+          </div>
+          <div>
+            <button id="btnAutoArrange" class="btn">🧭 Auto-arrange</button>
+            <button id="btnClear" class="btn">🗑 Clear Map</button>
+          </div>
+        </div>
+        <hr style="border:none;border-top:1px solid rgba(255,255,255,0.03);margin:10px 0">
+        <div style="display:flex;gap:8px;align-items:center">
+          <img id="selThumb" class="thumb" src="">
+          <div style="flex:1">
+            <div id="selName">No selection</div>
+            <div class="muted" id="selInfo">Tap a dot on map to select.</div>
+            <div style="margin-top:8px;display:flex;gap:6px">
+              <button id="btnSetStart" class="btn">⭐ Set Start</button>
+              <button id="btnDelete" class="btn">🗑 Delete</button>
+            </div>
+          </div>
+        </div>
+        <hr style="border:none;border-top:1px solid rgba(255,255,255,0.03);margin:10px 0">
+        <div style="margin-bottom:8px">
+          <label class="muted">Auto-link: nearest k</label>
+          <input id="linkK" type="range" min="1" max="6" value="2"/>
+        </div>
+        <div style="margin-bottom:8px">
+          <label class="muted">Max link distance (px, 0=disabled)</label>
+          <input id="linkDist" type="range" min="0" max="1000" value="0"/>
+        </div>
+      </aside>
+    </div>
+  </section>
+
+  <section id="viewerPage" class="page">
+    <div id="viewerWrapper" style="position:relative;width:100%;height:100%">
+      <div id="viewerCanvas"></div>
+      <div class="viewer-ui">
+        <div style="display:flex;gap:8px;align-items:center">
+          <div class="pill" id="viewerLabel">🔭 Viewer</div>
+          <button id="btnLinkMode" class="btn">🔗 Link Mode</button>
+        </div>
+      </div>
+      <div class="viewer-bottom">
+        <div class="pill">Tap arrows to travel • Pinch to zoom</div>
+      </div>
+      <div id="linkChoices" class="linkOverlay" style="display:none"></div>
+    </div>
+  </section>
+
+  <section id="libraryPage" class="page">
+    <div style="padding:12px;overflow:auto;height:100%">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <strong>📚 Library</strong>
+        <button id="btnAddFromLibrary" class="btn">Place Selected</button>
+      </div>
+      <div id="libraryGrid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:12px"></div>
+    </div>
+  </section>
+
+  <section id="mapsPage" class="page">
+    <div style="padding:12px;overflow:auto;height:100%">
+      <strong>💾 Saved Maps</strong>
+      <div id="mapsList" style="margin-top:12px"></div>
+    </div>
+  </section>
+
+  <section id="settingsPage" class="page">
+    <div style="padding:12px;overflow:auto;height:100%">
+      <strong>⚙️ Import / Export</strong>
+      <textarea id="mapJson" spellcheck="false" style="width:100%;height:320px;margin-top:12px"></textarea>
+      <div style="margin-top:8px">
+        <button id="btnExportJSON" class="btn primary">Export JSON</button>
+        <button id="btnImportJSON" class="btn">Import JSON</button>
+      </div>
+    </div>
+  </section>
+</main>
+
+<button id="fab">＋</button>
+<input id="fileInput" type="file" accept="image/*" multiple style="display:none"/>
+
+<nav id="bottom">
+  <button data-target="mapPage" class="active">🗺️<div style="font-size:12px">Map</div></button>
+  <button data-target="viewerPage">🔭<div style="font-size:12px">Viewer</div></button>
+  <button data-target="libraryPage">📚<div style="font-size:12px">Library</div></button>
+  <button data-target="mapsPage">💾<div style="font-size:12px">Maps</div></button>
+  <button data-target="settingsPage">⚙️<div style="font-size:12px">Settings</div></button>
+</nav>
+
+<script type="module">
+import * as THREE from 'three';
+
+/* ---------------------------
+   Module-scoped state & helpers
+   --------------------------- */
+const $ = id => document.getElementById(id);
+
+let mapData = { name: "Untitled map", photospheres: [], links: [], startId: null };
+let selectedId = null;
+const clamp = (v,a,b)=>Math.max(a,Math.min(b,v));
+const makeId = ()=> 'ps'+Math.random().toString(36).slice(2,9);
+
+/* IndexedDB helpers (sanitized save) */
+const DB = 'photosphere_maps_v1';
+let idb = null;
+function openDB(){ return new Promise((res,rej)=>{ if(idb) return res(idb); const rq = indexedDB.open(DB,1); rq.onupgradeneeded = e => { const db = e.target.result; if(!db.objectStoreNames.contains('maps')) db.createObjectStore('maps',{keyPath:'name'}); }; rq.onsuccess = e => { idb = e.target.result; res(idb); }; rq.onerror = rej; });}
+async function saveMap(name){
+  await openDB();
+  const storeName = name || mapData.name || ('map-'+Date.now());
+  const sanitized = {
+    name: storeName,
+    startId: mapData.startId || null,
+    links: (mapData.links || []).map(l=>({from:l.from,to:l.to})),
+    photospheres: (mapData.photospheres || []).map(p=>({
+      id:p.id, name:p.name, img:p.img, thumb:p.thumb, x:p.x, y:p.y
+    }))
+  };
+  return new Promise((res,rej)=>{
+    const tx = idb.transaction('maps','readwrite');
+    tx.objectStore('maps').put({ name: storeName, data: sanitized });
+    tx.oncomplete = ()=> res(); tx.onerror = e=> rej(e);
+  });
+}
+async function listMaps(){
+  await openDB();
+  return new Promise((res,rej)=>{ const out=[]; const rq = idb.transaction('maps','readonly').objectStore('maps').openCursor(); rq.onsuccess = e => { const c = e.target.result; if(c){ out.push({name:c.key,data:c.value.data}); c.continue(); } else res(out); }; rq.onerror = rej; });
+}
+async function loadMap(name){
+  await openDB();
+  return new Promise((res,rej)=>{ const req = idb.transaction('maps','readonly').objectStore('maps').get(name); req.onsuccess = e => { if(e.target.result){ mapData = e.target.result.data; mapData.photospheres = mapData.photospheres || []; mapData.links = mapData.links || []; drawMap(); populateLibrary(); if(mapData.photospheres.length) spawnPhotosphere(mapData.photospheres[0].id); res(mapData);} else res(null); }; req.onerror = rej; });
+}
+async function deleteMap(name){ await openDB(); return new Promise((r,j)=>{ const tx = idb.transaction('maps','readwrite'); tx.objectStore('maps').delete(name); tx.oncomplete = ()=> r(); tx.onerror = j; });}
+async function clearDB(){ await openDB(); return new Promise((r,j)=>{ const tx = idb.transaction('maps','readwrite'); tx.objectStore('maps').clear(); tx.oncomplete = ()=> r(); tx.onerror = j; });}
+
+/* ---------------------------
+   UI wiring
+   --------------------------- */
+function wireUI(){
+  // bottom nav
+  const pages = document.querySelectorAll('.page');
+  const bottomBtns = document.querySelectorAll('#bottom button');
+  bottomBtns.forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      bottomBtns.forEach(b=>b.classList.remove('active'));
+      btn.classList.add('active');
+      const t = btn.dataset.target;
+      pages.forEach(p=>p.classList.remove('active'));
+      document.getElementById(t).classList.add('active');
+    });
+  });
+
+  $('fab').addEventListener('click', ()=> $('fileInput').click());
+  $('fileInput').addEventListener('change', handleFiles);
+  $('btnAutoArrange').addEventListener('click', autoArrange);
+  $('btnSetStart').addEventListener('click', ()=>{ if(selectedId){ mapData.startId = selectedId; drawMap(); alert('Start set'); }});
+  $('btnDelete').addEventListener('click', ()=>{ if(!selectedId) return; if(confirm('Delete?')){ mapData.photospheres = mapData.photospheres.filter(p=>p.id!==selectedId); mapData.links = mapData.links.filter(l=>l.from!==selectedId && l.to!==selectedId); selectedId=null; drawMap(); populateLibrary(); }});
+  $('btnSave').addEventListener('click', async ()=>{ const name = prompt('Map name', mapData.name||('map-'+Date.now())); if(name){ try{ await saveMap(name); alert('Saved'); await refreshMapsList(); }catch(e){ alert('Save failed: '+(e.message||e)); }}});
+  $('btnExport').addEventListener('click', ()=>{ $('mapJson').value = JSON.stringify(mapData); document.querySelectorAll('.page').forEach(p=>p.classList.remove('active')); $('settingsPage').classList.add('active'); document.querySelector('#bottom button[data-target=\"settingsPage\"]').classList.add('active'); });
+  $('btnImport').addEventListener('click', ()=>{ document.querySelectorAll('.page').forEach(p=>p.classList.remove('active')); $('settingsPage').classList.add('active'); document.querySelector('#bottom button[data-target=\"settingsPage\"]').classList.add('active'); });
+  $('btnExportJSON').addEventListener('click', ()=>{ const blob = new Blob([JSON.stringify(mapData)],{type:'application/json'}); const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download=(mapData.name||'map')+'.json'; a.click(); URL.revokeObjectURL(url); });
+  $('btnImportJSON').addEventListener('click', ()=>{ try{ const j=JSON.parse($('mapJson').value); mapData=j; drawMap(); populateLibrary(); if(j.photospheres && j.photospheres.length) spawnPhotosphere(j.photospheres[0].id); alert('Imported'); }catch(e){ alert('Invalid JSON'); }});
+  $('btnLinkMode').addEventListener('click', ()=>{ linkMode = !linkMode; $('btnLinkMode').style.background = linkMode ? 'rgba(0,191,166,0.12)' : 'transparent'; $('linkChoices').style.display = 'none'; });
+  $('linkK').addEventListener('input', ()=>{ recomputeLinks(); drawMap(); });
+  $('linkDist').addEventListener('input', ()=>{ recomputeLinks(); drawMap(); });
+  $('btnClear').addEventListener && $('btnClear').addEventListener('click', ()=>{ if(confirm('Clear map?')){ mapData = { name:'Untitled map', photospheres:[], links:[], startId:null }; selectedId=null; drawMap(); populateLibrary(); }});
+}
+
+/* ---------------------------
+   Canvas / Map rendering
+   --------------------------- */
+let canvas, ctx, canvasW=0, canvasH=0;
+let pan = {x:0,y:0}, scale = 1;
+let isPanning=false, lastPan=null, dragging=false, dragOffset={x:0,y:0}, lastPointerId=null;
+
+function setupCanvas(){
+  canvas = $('mapCanvas'); ctx = canvas.getContext('2d');
+  resizeCanvas();
+  window.addEventListener('resize', resizeCanvas);
+
+  canvas.addEventListener('wheel', e=>{
+    e.preventDefault();
+    const delta = -e.deltaY * 0.001;
+    const oldScale = scale;
+    scale = clamp(scale * (1 + delta), 0.3, 3);
+    const mx = e.offsetX, my = e.offsetY;
+    pan.x = mx - (mx - pan.x) * (scale/oldScale);
+    pan.y = my - (my - pan.y) * (scale/oldScale);
+    drawMap();
+  });
+
+  canvas.addEventListener('pointerdown', e=>{
+    canvas.setPointerCapture(e.pointerId);
+    lastPointerId = e.pointerId;
+    const p = hitTestCanvas(e.offsetX, e.offsetY);
+    if(p){
+      selectedId = p.id; updateInspector();
+      dragging = true;
+      dragOffset.x = (e.offsetX - pan.x)/scale - p.x;
+      dragOffset.y = (e.offsetY - pan.y)/scale - p.y;
+      drawMap(); return;
+    }
+    isPanning = true; lastPan = {x:e.clientX,y:e.clientY};
+  });
+
+  canvas.addEventListener('pointermove', e=>{
+    if(e.pointerId !== lastPointerId) return;
+    if(dragging && selectedId){
+      const ps = mapData.photospheres.find(x=>x.id===selectedId);
+      if(!ps) return;
+      const worldX = (e.offsetX - pan.x)/scale - dragOffset.x, worldY = (e.offsetY - pan.y)/scale - dragOffset.y;
+      ps.x = clamp(worldX, 20, canvasW-20);
+      ps.y = clamp(worldY, 20, canvasH-20);
+      recomputeLinks(); drawMap(); updateInspector(); return;
+    }
+    if(isPanning && lastPan){
+      const dx = e.clientX - lastPan.x, dy = e.clientY - lastPan.y;
+      pan.x += dx; pan.y += dy; lastPan = {x:e.clientX,y:e.clientY}; drawMap();
+    }
+  });
+
+  canvas.addEventListener('pointerup', e=>{
+    try{ canvas.releasePointerCapture(e.pointerId); }catch(e){}
+    isPanning=false; lastPan=null; dragging=false; lastPointerId=null;
+  });
+  canvas.addEventListener('dblclick', ()=> $('fileInput').click());
+}
+
+function resizeCanvas(){
+  canvasW = window.innerWidth - (window.innerWidth > 900 ? 320 : 0);
+  canvasH = window.innerHeight - 56 - 84;
+  if(canvas){ canvas.width = canvasW; canvas.height = canvasH; }
+  drawMap();
+}
+
+function hitTestCanvas(mx,my){
+  const x = (mx - pan.x)/scale, y = (my - pan.y)/scale;
+  for(const ps of mapData.photospheres){
+    const d = Math.hypot(ps.x - x, ps.y - y);
+    if(d < 28) return ps;
+  }
+  return null;
+}
+
+function drawMap(){
+  if(!ctx) return;
+  ctx.fillStyle = '#2b2e30'; ctx.fillRect(0,0,canvas.width, canvas.height);
+  ctx.strokeStyle = 'rgba(255,255,255,0.03)'; ctx.lineWidth = 1;
+  const step = 64;
+  for(let gx = (pan.x % (step*scale)) - step*scale; gx<canvas.width; gx+=step*scale){ ctx.beginPath(); ctx.moveTo(gx,0); ctx.lineTo(gx,canvas.height); ctx.stroke(); }
+  for(let gy = (pan.y % (step*scale)) - step*scale; gy<canvas.height; gy+=step*scale){ ctx.beginPath(); ctx.moveTo(0,gy); ctx.lineTo(canvas.width,gy); ctx.stroke(); }
+
+  recomputeLinks();
+  // draw links
+  ctx.lineWidth = 2; ctx.strokeStyle = '#00bfa6';
+  for(const link of mapData.links){
+    const a = mapData.photospheres.find(p=>p.id===link.from); const b = mapData.photospheres.find(p=>p.id===link.to);
+    if(!a||!b) continue;
+    const ax = a.x*scale + pan.x, ay = a.y*scale + pan.y, bx = b.x*scale + pan.x, by = b.y*scale + pan.y;
+    ctx.beginPath(); ctx.moveTo(ax,ay); ctx.lineTo(bx,by); ctx.stroke();
+    const ang = Math.atan2(by-ay, bx-ax); const ah = 10;
+    ctx.beginPath(); ctx.moveTo(bx,by); ctx.lineTo(bx - ah*Math.cos(ang - 0.35), by - ah*Math.sin(ang - 0.35)); ctx.lineTo(bx - ah*Math.cos(ang + 0.35), by - ah*Math.sin(ang + 0.35)); ctx.closePath(); ctx.fillStyle = '#00bfa6'; ctx.fill();
+  }
+
+  // draw nodes (with thumb inside)
+  for(const ps of mapData.photospheres){
+    const cx = ps.x*scale + pan.x, cy = ps.y*scale + pan.y;
+    ctx.beginPath(); ctx.fillStyle = '#222'; ctx.arc(cx,cy,22,0,Math.PI*2); ctx.fill();
+    if(ps.thumb){
+      if(!ps._img){ const i = new Image(); i.src = ps.thumb; ps._img = i; i.onload = ()=> drawMap(); }
+      const img = ps._img;
+      if(img.complete){ ctx.save(); ctx.beginPath(); ctx.arc(cx,cy,20,0,Math.PI*2); ctx.clip(); ctx.drawImage(img, cx-20, cy-20, 40, 40); ctx.restore(); }
+    }
+    ctx.strokeStyle = selectedId===ps.id ? '#fff' : 'rgba(255,255,255,0.12)'; ctx.lineWidth = selectedId===ps.id ? 3 : 1;
+    ctx.beginPath(); ctx.arc(cx,cy,22,0,Math.PI*2); ctx.stroke();
+    ctx.fillStyle = '#ddd'; ctx.font='12px system-ui'; ctx.fillText(ps.name||ps.id, cx+28, cy+5);
+    if(mapData.startId === ps.id){ ctx.fillStyle = '#ffd54f'; ctx.beginPath(); ctx.arc(cx-18, cy-18, 7, 0, Math.PI*2); ctx.fill(); }
+  }
+  $('mapMeta').innerText = `${mapData.photospheres.length} photospheres`;
+}
+
+/* recompute links: nearest-k */
+function recomputeLinks(){
+  const k = parseInt($('linkK').value) || 2;
+  const maxDist = parseInt($('linkDist').value) || 0;
+  mapData.links = [];
+  for(const a of mapData.photospheres){
+    const others = mapData.photospheres.filter(p=>p.id!==a.id).map(p=>({p,d:Math.hypot(p.x-a.x,p.y-a.y)})).sort((x,y)=>x.d - y.d);
+    let count = 0;
+    for(const o of others){
+      if(maxDist>0 && o.d > maxDist) break;
+      mapData.links.push({ from: a.id, to: o.p.id });
+      count++; if(count>=k) break;
+    }
+  }
+}
+
+/* auto arrange */
+function autoArrange(){
+  const n = mapData.photospheres.length; if(n===0) return;
+  const cx = canvasW/2, cy = canvasH/2, r = Math.min(canvasW, canvasH)/3;
+  mapData.photospheres.forEach((p,i)=>{ const a = i/n * Math.PI*2; p.x = cx/scale + Math.cos(a)*r/scale; p.y = cy/scale + Math.sin(a)*r/scale; });
+  recomputeLinks(); drawMap();
+}
+
+/* ---------------------------
+   File upload + thumbs
+   --------------------------- */
+async function handleFiles(ev){
+  const files = ev.target.files ? Array.from(ev.target.files) : [];
+  for(const file of files){
+    const dataUrl = await new Promise((res,rej)=>{ const r=new FileReader(); r.onload=()=>res(r.result); r.onerror=rej; r.readAsDataURL(file); });
+    const {thumb, imgDown} = await downscaleImage(dataUrl, 2048, 256);
+    const id = makeId();
+    mapData.photospheres.push({ id, name: file.name, img: imgDown, thumb, x: canvasW/2/scale, y: canvasH/2/scale });
+  }
+  drawMap(); populateLibrary();
+  $('fileInput').value = '';
+}
+async function downscaleImage(dataUrl, maxDim=2048, thumbMax=256){
+  return new Promise((res,rej)=>{ const img = new Image(); img.onload = ()=>{ const w=img.width,h=img.height; const ratio = Math.min(1, maxDim/Math.max(w,h)); const vw = Math.round(w*ratio), vh = Math.round(h*ratio); const cv = document.createElement('canvas'); cv.width = vw; cv.height = vh; cv.getContext('2d').drawImage(img,0,0,vw,vh); const viewerData = cv.toDataURL('image/jpeg', 0.92); const tr = Math.min(1, thumbMax/Math.max(w,h)); const tw = Math.max(32, Math.round(w*tr)), th = Math.max(32, Math.round(h*tr)); const tv = document.createElement('canvas'); tv.width=tw; tv.height=th; tv.getContext('2d').drawImage(img,0,0,tw,th); const thumbData = tv.toDataURL('image/jpeg', 0.75); res({thumb:thumbData, imgDown:viewerData}); }; img.onerror = rej; img.src = dataUrl; });
+}
+
+/* ---------------------------
+   Library & saved maps UI
+   --------------------------- */
+function populateLibrary(){
+  const grid = $('libraryGrid'); grid.innerHTML = '';
+  for(const ps of mapData.photospheres){
+    const card = document.createElement('div'); card.className='card'; card.style.background='rgba(255,255,255,0.02)'; card.style.padding='8px'; card.style.borderRadius='8px';
+    const img = document.createElement('img'); img.src = ps.thumb || ps.img; img.style.width='100%'; img.style.height='96px'; img.style.objectFit='cover'; img.style.borderRadius='6px';
+    card.appendChild(img);
+    const title = document.createElement('div'); title.style.marginTop='6px'; title.innerText = ps.name || ps.id; card.appendChild(title);
+    const row = document.createElement('div'); row.style.display='flex'; row.style.gap='8px'; row.style.marginTop='8px';
+    const place = document.createElement('button'); place.className='btn'; place.innerText='Place'; place.addEventListener('click', ()=>{ ps.x = canvasW/2/scale; ps.y = canvasH/2/scale; drawMap(); });
+    const view = document.createElement('button'); view.className='btn'; view.innerText='View'; view.addEventListener('click', ()=> spawnPhotosphere(ps.id));
+    row.appendChild(place); row.appendChild(view); card.appendChild(row); grid.appendChild(card);
+  }
+}
+
+async function refreshMapsList(){
+  try{
+    await openDB();
+    const list = await listMaps();
+    const container = $('mapsList'); container.innerHTML = '';
+    for(const m of list){
+      const row = document.createElement('div'); row.style.display='flex'; row.style.justifyContent='space-between'; row.style.alignItems='center'; row.style.padding='8px'; row.style.background='rgba(255,255,255,0.02)'; row.style.borderRadius='8px'; row.style.marginBottom='8px';
+      const left = document.createElement('div'); left.innerHTML = `<strong>${m.name}</strong><div class="muted">${m.data.photospheres?.length||0} photos</div>`;
+      const right = document.createElement('div');
+      const load = document.createElement('button'); load.className='btn'; load.innerText='Load'; load.addEventListener('click', ()=> loadMap(m.name).then(()=>alert('Loaded')));
+      const del = document.createElement('button'); del.className='btn'; del.innerText='Delete'; del.addEventListener('click', async ()=>{ if(confirm('Delete map?')){ await deleteMap(m.name); await refreshMapsList(); }});
+      right.appendChild(load); right.appendChild(del); row.appendChild(left); row.appendChild(right); container.appendChild(row);
+    }
+  }catch(e){ console.warn(e); }
+}
+
+/* ---------------------------
+   Viewer (three.js) — single pointerDistance
+   --------------------------- */
+let viewerEl, viewerRenderer, viewerCamera, viewerScene;
+let controls = { yaw:0, pitch:0, fov:75 };
+let currentViewerId = null;
+let linkMode = false;
+
+/* single declaration for pointerDistance used across the module */
+const pointerDistance = (a,b) => {
+  const dx = a.clientX - b.clientX, dy = a.clientY - b.clientY;
+  return Math.sqrt(dx*dx + dy*dy);
+};
+
+function setupViewer(){
+  viewerEl = $('viewerCanvas');
+  viewerScene = new THREE.Scene(); viewerScene.background = new THREE.Color(0x111111);
+  viewerCamera = new THREE.PerspectiveCamera(75, window.innerWidth/(window.innerHeight-140), 0.01, 100);
+  viewerRenderer = new THREE.WebGLRenderer({antialias:true}); viewerRenderer.setPixelRatio(window.devicePixelRatio); viewerRenderer.setSize(window.innerWidth, window.innerHeight-140);
+  viewerEl.appendChild(viewerRenderer.domElement);
+  viewerScene.add(new THREE.HemisphereLight(0xffffff,0x444444,1.0));
+
+  let dragging=false, last={x:0,y:0};
+  viewerRenderer.domElement.addEventListener('pointerdown', e=>{ dragging=true; last.x=e.clientX; last.y=e.clientY; viewerRenderer.domElement.setPointerCapture?.(e.pointerId); });
+  viewerRenderer.domElement.addEventListener('pointermove', e=>{ if(dragging){ controls.yaw += (e.clientX - last.x)*0.005; controls.pitch += (e.clientY - last.y)*0.005; controls.pitch = clamp(controls.pitch, -Math.PI/2, Math.PI/2); last.x=e.clientX; last.y=e.clientY; }});
+  viewerRenderer.domElement.addEventListener('pointerup', e=>{ dragging=false; try{ viewerRenderer.domElement.releasePointerCapture?.(e.pointerId);}catch(_){} });
+  viewerRenderer.domElement.addEventListener('wheel', e=>{ controls.fov = clamp(controls.fov + e.deltaY*0.02, 20, 120); viewerCamera.fov = controls.fov; viewerCamera.updateProjectionMatrix(); });
+
+  let pinchStart=null;
+  viewerRenderer.domElement.addEventListener('touchstart', e=>{ if(e.touches.length===2) pinchStart = pointerDistance(e.touches[0], e.touches[1]); });
+  viewerRenderer.domElement.addEventListener('touchmove', e=>{ if(e.touches.length===2 && pinchStart){ const d = pointerDistance(e.touches[0], e.touches[1]); const delta = (pinchStart - d)/200; controls.fov = clamp(controls.fov + delta, 30, 120); viewerCamera.fov = controls.fov; viewerCamera.updateProjectionMatrix(); pinchStart = d; }});
+  viewerRenderer.domElement.addEventListener('touchend', e=>{ if(e.touches.length<2) pinchStart = null; });
+
+  viewerRenderer.domElement.addEventListener('click', ev=>{
+    const rect = viewerRenderer.domElement.getBoundingClientRect();
+    const mx = ((ev.clientX - rect.left) / rect.width) * 2 - 1;
+    const my = -((ev.clientY - rect.top) / rect.height) * 2 + 1;
+    if(linkMode && currentViewerId){
+      const ndc = new THREE.Vector3(mx,my,0.5);
+      const worldDir = ndc.clone().unproject(viewerCamera).sub(viewerCamera.position).normalize();
+      const ang = Math.atan2(worldDir.z, worldDir.x);
+      const cur = mapData.photospheres.find(p=>p.id===currentViewerId);
+      if(!cur) return;
+      const candidates = mapData.photospheres.filter(p=>p.id!==cur.id).map(p=>{
+        const mapAng = Math.atan2(p.y - cur.y, p.x - cur.x);
+        const diff = Math.abs(normalizeAngle(mapAng - ang));
+        const dist = Math.hypot(p.x - cur.x, p.y - cur.y);
+        return {p, diff, mapAng, dist};
+      }).sort((a,b)=>a.diff - b.diff).slice(0,6);
+      if(candidates.length===0){ return; }
+      showLinkChoices(candidates, ang, cur.id);
+      return;
+    }
+    const ray = new THREE.Raycaster(); ray.setFromCamera(new THREE.Vector2(mx,my), viewerCamera);
+    const clickable = viewerScene.children.filter(c=>c.userData?.target);
+    const hits = ray.intersectObjects(clickable, true);
+    if(hits.length>0){ const tgt = hits[0].object.userData.target; fadeTransition(()=> spawnPhotosphere(tgt)); }
+  });
+
+  (function loop(){
+    requestAnimationFrame(loop);
+    const qYaw = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,1,0), controls.yaw);
+    const qPitch = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1,0,0), controls.pitch);
+    viewerCamera.quaternion.copy(qYaw.multiply(qPitch));
+    viewerCamera.position.set(0,0,0);
+    viewerRenderer.render(viewerScene, viewerCamera);
+  })();
+}
+
+/* show link candidates */
+function normalizeAngle(a){ while(a>Math.PI) a -= Math.PI*2; while(a<-Math.PI) a += Math.PI*2; return a; }
+function showLinkChoices(candidates, angClicked, fromId){
+  const container = $('linkChoices'); container.innerHTML = ''; container.style.display = 'flex';
+  for(const c of candidates){
+    const img = document.createElement('img'); img.className='linkThumb'; img.src = c.p.thumb || c.p.img; img.title = c.p.name || c.p.id;
+    img.addEventListener('click', ()=>{
+      const exists = mapData.links.some(l=>l.from===fromId && l.to===c.p.id);
+      if(!exists) mapData.links.push({ from: fromId, to: c.p.id });
+      drawMap(); spawnPhotosphere(fromId); container.style.display = 'none';
+    });
+    container.appendChild(img);
+  }
+  const cancel = document.createElement('button'); cancel.className='btn'; cancel.innerText='Cancel'; cancel.addEventListener('click', ()=> container.style.display='none');
+  container.appendChild(cancel);
+  setTimeout(()=>{ if(container) container.style.display='none'; }, 12000);
+}
+
+/* spawn photosphere: place arrows correctly using map bearing */
+function spawnPhotosphere(id){
+  const ps = mapData.photospheres.find(p=>p.id===id); if(!ps) return;
+  currentViewerId = id;
+  // clear everything except lights
+  viewerScene.children = viewerScene.children.filter(c=>c.type === 'HemisphereLight' || c.type === 'AmbientLight');
+
+  // sphere
+  const tex = new THREE.TextureLoader().load(ps.img);
+  const geo = new THREE.SphereGeometry(5, 64, 64); geo.scale(-1,1,1);
+  const mat = new THREE.MeshBasicMaterial({ map: tex });
+  const sphere = new THREE.Mesh(geo, mat); viewerScene.add(sphere);
+
+  // arrows for links from this pano
+  const links = mapData.links.filter(l=>l.from === id);
+  for(const l of links){
+    const target = mapData.photospheres.find(p=>p.id===l.to); if(!target) continue;
+    const ang = Math.atan2(target.y - ps.y, target.x - ps.x);
+    const dir = new THREE.Vector3(Math.cos(ang), 0, Math.sin(ang)).normalize();
+    const radius = 5.0;
+    const pos = dir.clone().multiplyScalar(radius - 0.25);
+    const cone = new THREE.Mesh(new THREE.ConeGeometry(0.18, 0.6, 16), new THREE.MeshBasicMaterial({ color: 0x00bfa6 }));
+    cone.position.copy(pos);
+    // orient +Y to dir
+    const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0,1,0), dir.clone().normalize());
+    cone.quaternion.copy(q);
+    // point tip a bit outward
+    cone.position.add(dir.clone().multiplyScalar(0.12));
+    cone.userData.target = target.id;
+    viewerScene.add(cone);
+  }
+
+  // reset view controls
+  controls.yaw = 0; controls.pitch = 0; controls.fov = 75; viewerCamera.fov = 75; viewerCamera.updateProjectionMatrix();
+  $('viewerLabel').innerText = ps.name || ps.id;
+  document.querySelector('#bottom button[data-target="viewerPage"]').click();
+}
+
+/* ---------------------------
+   Utilities & boot
+   --------------------------- */
+function fadeTransition(cb){ const overlay = document.createElement('div'); overlay.style.position='fixed'; overlay.style.inset='0'; overlay.style.background='#000'; overlay.style.opacity='0'; overlay.style.transition='opacity 260ms'; overlay.style.zIndex='999'; document.body.appendChild(overlay); requestAnimationFrame(()=> overlay.style.opacity='1'); setTimeout(()=>{ cb(); overlay.style.opacity='0'; setTimeout(()=>overlay.remove(),300); },260); }
+
+/* ---------------------------
+   Init sequence
+   --------------------------- */
+function init(){
+  wireUI();
+  setupCanvas();
+  setupViewer();
+  openDB().then(()=> refreshMapsList()).catch(()=>{});
+  drawMap();
+  populateLibrary();
+  canvas.addEventListener('click', ()=> updateInspector());
+}
+window.addEventListener('DOMContentLoaded', init);
+
+/* ---------------------------
+   Small helpers & other functions
+   --------------------------- */
+function updateInspector(){ const sel = mapData.photospheres.find(p=>p.id===selectedId); if(!sel){ $('selThumb').src=''; $('selName').innerText='No selection'; $('selInfo').innerText='Tap a dot on map to select.'; return; } $('selThumb').src = sel.thumb || sel.img; $('selName').innerText = sel.name || sel.id; $('selInfo').innerText = `x:${sel.x.toFixed(0)} y:${sel.y.toFixed(0)}`; }
+
+/* Expose for debugging if needed */
+window.drawMap = drawMap;
+window.spawnPhotosphere = spawnPhotosphere;
+window.refreshMapsList = refreshMapsList;
+
+</script>
+</body>
+</html>
