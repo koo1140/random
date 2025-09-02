@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>WebXR Hand Tracking AR</title>
+<style>
+  body { margin:0; overflow:hidden; }
+  #startButton { position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); padding:12px 24px; font-size:16px; z-index:10; }
+</style>
+</head>
+<body>
+
+<button id="startButton">Start AR</button>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.154.0/build/three.module.js"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+
+// Three.js setup
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera();
+const renderer = new THREE.WebGLRenderer({antialias:true, alpha:true});
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.xr.enabled = true;
+renderer.xr.setReferenceSpaceType('local');
+document.body.appendChild(renderer.domElement);
+
+const startButton = document.getElementById('startButton');
+
+startButton.onclick = async () => {
+    if(!navigator.xr){ alert("WebXR not supported"); return; }
+
+    const session = await navigator.xr.requestSession('immersive-ar', {
+        optionalFeatures: ['hand-tracking','local-floor']
+    });
+    renderer.xr.setSession(session);
+    startButton.style.display = 'none';
+
+    // Store spawned cubes
+    const cubes = [];
+
+    // Function to spawn cube at given position/rotation
+    function spawnCube(pos, rot){
+        const geometry = new THREE.BoxGeometry(0.05,0.05,0.05);
+        const material = new THREE.MeshNormalMaterial();
+        const cube = new THREE.Mesh(geometry, material);
+        cube.position.copy(pos);
+        cube.quaternion.copy(rot);
+        scene.add(cube);
+        cubes.push(cube);
+    }
+
+    // Render loop
+    renderer.setAnimationLoop(() => {
+        const xrCamera = renderer.xr.getCamera(camera);
+        const session = renderer.xr.getSession();
+        if(session){
+            session.inputSources.forEach(inputSource => {
+                if(inputSource.hand){
+                    // Example: spawn object at index finger tip
+                    const indexTip = inputSource.hand.get('index-finger-tip');
+                    if(indexTip){
+                        const pose = indexTip.getPose(renderer.xr.getReferenceSpace());
+                        if(pose){
+                            const pos = new THREE.Vector3().fromArray(pose.transform.position);
+                            const rot = new THREE.Quaternion().fromArray(pose.transform.orientation);
+
+                            // Spawn cube on pinch gesture (distance thumb tip < threshold)
+                            const thumbTip = inputSource.hand.get('thumb-tip');
+                            if(thumbTip){
+                                const thumbPose = thumbTip.getPose(renderer.xr.getReferenceSpace());
+                                if(thumbPose){
+                                    const thumbPos = new THREE.Vector3().fromArray(thumbPose.transform.position);
+                                    const dist = pos.distanceTo(thumbPos);
+                                    if(dist < 0.03){ // pinch threshold ~3cm
+                                        spawnCube(pos, rot);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        renderer.render(scene, camera);
+    });
+};
+</script>
+</body>
+</html>
