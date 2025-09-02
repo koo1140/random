@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Photosphere Map</title>
+<style>
+body{margin:0;font-family:Arial, sans-serif;overflow:hidden;}
+#ui{position:absolute;bottom:0;width:100%;height:80px;background:#222;display:flex;justify-content:space-around;align-items:center;color:#fff;}
+#ui button{flex:1;height:100%;border:none;background:none;color:#fff;font-size:18px;}
+.page{position:absolute;top:0;left:0;width:100%;height:calc(100% - 80px);display:none;}
+.page.active{display:block;}
+#mapCanvas{background:#333;}
+#settings textarea{width:100%;height:80%;background:#222;color:#0f0;border:none;padding:5px;font-family:monospace;font-size:12px;}
+#settings button{margin:5px;}
+#uploadBtn{position:absolute;top:10px;left:10px;z-index:10;}
+</style>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.150.1/build/three.module.js"
+  }
+}
+</script>
+</head>
+<body>
+<button id="uploadBtn">Upload Photospheres</button>
+<canvas id="mapCanvas"></canvas>
+<div id="viewer" class="page"></div>
+<div id="settings" class="page">
+  <textarea id="mapJson"></textarea>
+  <br>
+  <button id="importBtn">Import JSON</button>
+  <button id="exportBtn">Export JSON</button>
+  <button id="clearBtn">Clear DB</button>
+</div>
+<div id="ui">
+  <button data-page="map">Map</button>
+  <button data-page="viewer">Viewer</button>
+  <button data-page="settings">Settings</button>
+</div>
+<input type="file" id="uploadInput" multiple accept="image/*" style="display:none"/>
+<script type="module">
+import * as THREE from 'three';
+
+//////////////////////
+// Map data
+let mapData={photospheres:[],arrows:[]};
+let currentPhotosphere=null;
+
+//////////////////////
+// IndexedDB
+const dbName="PhotosphereMaps";
+let db;
+const request=indexedDB.open(dbName,1);
+request.onupgradeneeded=e=>{db=e.target.result;db.createObjectStore("maps",{keyPath:"name"});};
+request.onsuccess=e=>{db=e.target.result;loadMaps();};
+request.onerror=e=>console.error(e);
+function saveMap(name){const tx=db.transaction("maps","readwrite");tx.objectStore("maps").put({name,data:mapData});}
+function loadMaps(){const tx=db.transaction("maps","readonly");const store=tx.objectStore("maps");const req=store.openCursor();req.onsuccess=e=>{const cursor=e.target.result;if(cursor){mapData=cursor.value.data;spawnPhotosphere(mapData.photospheres[0]);}};}
+
+//////////////////////
+// Bottom nav
+document.querySelectorAll('#ui button').forEach(btn=>{btn.onclick=()=>{document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));document.getElementById(btn.dataset.page).classList.add('active');};});
+document.querySelector('#ui button[data-page="map"]').click();
+
+//////////////////////
+// Map page
+const canvas=document.getElementById('mapCanvas');
+const ctx=canvas.getContext('2d');
+canvas.width=window.innerWidth; canvas.height=window.innerHeight-80;
+
+const uploadBtn=document.getElementById('uploadBtn');
+const uploadInput=document.getElementById('uploadInput');
+
+uploadBtn.onclick=()=>uploadInput.click();
+uploadInput.addEventListener('change',e=>{
+  for(let f of e.target.files){
+    const reader=new FileReader();
+    reader.onload=ev=>{
+      const id='ps'+Date.now();
+      mapData.photospheres.push({id,img:ev.target.result,x:canvas.width/2,y:canvas.height/2});
+      drawMap();
+    };
+    reader.readAsDataURL(f);
+  }
+});
+
+let dragId=null;
+canvas.addEventListener('mousedown',e=>{
+  for(let ps of mapData.photospheres){
+    if(Math.hypot(ps.x-e.offsetX,ps.y-e.offsetY)<20){dragId=ps.id;break;}
+  }
+});
+canvas.addEventListener('mousemove',e=>{if(dragId){const ps=mapData.photospheres.find(p=>p.id===dragId);ps.x=e.offsetX;ps.y=e.offsetY;drawMap();}});
+canvas.addEventListener('mouseup',e=>dragId=null);
+
+function drawMap(){
+  ctx.fillStyle="#333"; ctx.fillRect(0,0,canvas.width,canvas.height);
+  mapData.arrows=[];
+  for(let ps of mapData.photospheres){
+    if(mapData.photospheres.length>1){
+      let nearest=mapData.photospheres.filter(p=>p.id!==ps.id).sort((a,b)=>Math.hypot(a.x-ps.x,a.y-ps.y)-Math.hypot(b.x-ps.x,b.y-ps.y))[0];
+      mapData.arrows.push({from:ps.id,to:nearest.id});
+    }
+  }
+  ctx.strokeStyle="#0f0"; ctx.lineWidth=2;
+  for(let a of mapData.arrows){
+    const from=mapData.photospheres.find(p=>p.id===a.from);
+    const to=mapData.photospheres.find(p=>p.id===a.to);
+    ctx.beginPath(); ctx.moveTo(from.x,from.y); ctx.lineTo(to.x,to.y); ctx.stroke();
+  }
+  for(let ps of mapData.photospheres){
+    ctx.fillStyle="#f00"; ctx.beginPath(); ctx.arc(ps.x,ps.y,10,0,2*Math.PI); ctx.fill();
+  }
+}
+
+//////////////////////
+// Viewer
+const viewerDiv=document.getElementById('viewer');
+let scene=new THREE.Scene(); scene.background=new THREE.Color(0x222222);
+let camera=new THREE.PerspectiveCamera(75,window.innerWidth/(window.innerHeight-80),0.01,100);
+let renderer=new THREE.WebGLRenderer({antialias:true});
+renderer.setSize(window.innerWidth,window.innerHeight-80);
+viewerDiv.appendChild(renderer.domElement);
+
+let sphereMesh;
+function spawnPhotosphere(ps){
+  if(!ps) return;
+  currentPhotosphere=ps;
+  scene.clear();
+  const texture=new THREE.TextureLoader().load(ps.img);
+  const geometry=new THREE.SphereGeometry(5,64,64);
+  geometry.scale(-1,1,1);
+  const material=new THREE.MeshBasicMaterial({map:texture});
+  sphereMesh=new THREE.Mesh(geometry,material);
+  scene.add(sphereMesh);
+  camera.position.set(0,0,0);
+  drawArrows();
+}
+
+function drawArrows(){
+  scene.children=scene.children.filter(c=>c===sphereMesh);
+  const links=mapData.arrows.filter(a=>a.from===currentPhotosphere.id);
+  for(let a of links){
+    const to=mapData.photospheres.find(p=>p.id===a.to);
+    const arrow=new THREE.Mesh(new THREE.ConeGeometry(0.2,0.5,8),new THREE.MeshBasicMaterial({color:0x0f0}));
+    const angle=Math.random()*Math.PI*2;
+    arrow.position.set(Math.cos(angle)*2,0,Math.sin(angle)*2);
+    arrow.lookAt(0,0,0);
+    scene.add(arrow);
+    arrow.userData.target=to.id;
+    arrow.cursor='pointer';
+  }
+}
+
+let isDown=false,lastX,lastY,rotX=0,rotY=0;
+viewerDiv.addEventListener('mousedown',e=>{isDown=true;lastX=e.clientX;lastY=e.clientY;});
+viewerDiv.addEventListener('mousemove',e=>{if(isDown){rotY+=(e.clientX-lastX)*0.005;rotX+=(e.clientY-lastY)*0.005;rotX=Math.max(-Math.PI/2,Math.min(Math.PI/2,rotX));lastX=e.clientX;lastY=e.clientY;}});
+viewerDiv.addEventListener('mouseup',e=>isDown=false);
+viewerDiv.addEventListener('wheel',e=>{camera.fov=Math.max(20,Math.min(100,camera.fov+e.deltaY*0.05));camera.updateProjectionMatrix();});
+viewerDiv.addEventListener('touchstart',e=>{if(e.touches.length==1){isDown=true;lastX=e.touches[0].clientX;lastY=e.touches[0].clientY;}});
+viewerDiv.addEventListener('touchmove',e=>{if(isDown && e.touches.length==1){rotY+=(e.touches[0].clientX-lastX)*0.005;rotX+=(e.touches[0].clientY-lastY)*0.005;rotX=Math.max(-Math.PI/2,Math.min(Math.PI/2,rotX));lastX=e.touches[0].clientX;lastY=e.touches[0].clientY;}});
+viewerDiv.addEventListener('touchend',e=>{isDown=false;});
+
+function animate(){requestAnimationFrame(animate);camera.rotation.x=rotX;camera.rotation.y=rotY;renderer.render(scene,camera);}
+animate();
+
+//////////////////////
+// Settings
+const mapJson=document.getElementById('mapJson');
+document.getElementById('exportBtn').onclick=()=>{mapJson.value=JSON.stringify(mapData);}
+document.getElementById('importBtn').onclick=()=>{try{mapData=JSON.parse(mapJson.value);if(mapData.photospheres.length>0) spawnPhotosphere(mapData.photospheres[0]);drawMap();}catch(e){alert('Invalid JSON');}};
+document.getElementById('clearBtn').onclick=()=>{const tx=db.transaction("maps","readwrite");tx.objectStore("maps").clear();alert('DB cleared');};
+
+window.addEventListener('resize',()=>{
+  canvas.width=window.innerWidth;
+  canvas.height=window.innerHeight-80;
+  renderer.setSize(window.innerWidth,window.innerHeight-80);
+  camera.aspect=window.innerWidth/(window.innerHeight-80);
+  camera.updateProjectionMatrix();
+});
+</script>
+</body>
+</html>
