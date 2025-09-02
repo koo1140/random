@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AR Pinch Draw + Robust Clear</title>
+<style>
+  body { margin:0; overflow:hidden; background:#111; color:#eee; font-family:sans-serif;}
+  #startButton { position:absolute; top:20px; left:20px; padding:10px 20px; font-size:16px; cursor:pointer; z-index:10;}
+  video { display:none; }
+</style>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.154.0/build/three.module.js"
+  }
+}
+</script>
+</head>
+<body>
+
+<button id="startButton">Start AR</button>
+<video id="video" autoplay playsinline></video>
+
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+
+<script type="module">
+import * as THREE from "three";
+
+const video = document.getElementById('video');
+const startButton = document.getElementById('startButton');
+
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(70, window.innerWidth/window.innerHeight, 0.01, 10);
+camera.position.z = 0.5;
+
+const renderer = new THREE.WebGLRenderer({antialias:true, alpha:true});
+renderer.setPixelRatio(window.devicePixelRatio);
+renderer.setSize(window.innerWidth, window.innerHeight);
+document.body.appendChild(renderer.domElement);
+
+window.addEventListener('resize',()=>{
+  camera.aspect = window.innerWidth/window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+
+// fingertip points
+let tips = [], fingerLines = [];
+const tipGeom = new THREE.SphereGeometry(0.015,8,8);
+const tipMat = new THREE.MeshNormalMaterial();
+const lineMat = new THREE.LineBasicMaterial({color:0x00ff00});
+
+// drawing variables
+let drawing=false, currentLine=null, drawPoints=[];
+const drawMaterial = new THREE.LineBasicMaterial({ color:0xff0000, linewidth:3 });
+let drawnObjects=[];
+
+// utility
+function distance(a,b){ return a.clone().sub(b).length(); }
+function toVec3(lm){ return new THREE.Vector3(lm.x, lm.y, lm.z); }
+
+// smooth Catmull-Rom curve
+function smoothLine(points){
+  if(points.length<2) return points;
+  const curve = new THREE.CatmullRomCurve3(points);
+  return curve.getPoints(points.length*3);
+}
+
+// robust thumbs-down detection
+function isThumbsDown(landmarks){
+  const wrist = toVec3(landmarks[0]);
+  const indexMCP = toVec3(landmarks[5]);
+  const pinkyMCP = toVec3(landmarks[17]);
+  const v1 = indexMCP.clone().sub(wrist);
+  const v2 = pinkyMCP.clone().sub(wrist);
+  const palmNormal = new THREE.Vector3().crossVectors(v1,v2).normalize();
+
+  const thumbVec = toVec3(landmarks[4]).clone().sub(toVec3(landmarks[1])).normalize();
+  const thumbDot = thumbVec.dot(palmNormal);
+  if(thumbDot > -0.5) return false;
+
+  const fingerTips = [8,12,16,20];
+  const fingerPIPs = [6,10,14,18];
+  for(let i=0;i<4;i++){
+    const tip = toVec3(landmarks[fingerTips[i]]);
+    const pip = toVec3(landmarks[fingerPIPs[i]]);
+    const vec = tip.clone().sub(pip).normalize();
+    const dot = vec.dot(palmNormal);
+    if(dot < 0.5) return false; // finger not bent enough
+  }
+  return true;
+}
+
+let hands;
+
+startButton.onclick = async ()=>{
+  startButton.style.display='none';
+  try{
+    const stream = await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment'}});
+    video.srcObject = stream;
+    await video.play();
+
+    hands = new Hands({locateFile: (file)=>`https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`});
+    hands.setOptions({maxNumHands:2, modelComplexity:1, minDetectionConfidence:0.5, minTrackingConfidence:0.5});
+    hands.onResults(onHands);
+
+    requestAnimationFrame(handLoop);
+  }catch(e){ console.error(e); }
+};
+
+async function handLoop(){
+  try{
+    if(hands && video.readyState >=2){
+      await hands.send({image: video});
+    }
+  }catch(e){ console.error('Hand send error: '+e); }
+  requestAnimationFrame(handLoop);
+}
+
+function onHands(results){
+  tips.forEach(s=>scene.remove(s)); tips=[];
+  fingerLines.forEach(l=>scene.remove(l)); fingerLines=[];
+
+  if(!results.multiHandLandmarks) return;
+
+  results.multiHandLandmarks.forEach(landmarks=>{
+    const palm = toVec3(landmarks[0]);
+    const tipIndices = [4,8,12,16,20];
+
+    tipIndices.forEach(i=>{
+      const lm = landmarks[i];
+      const pos = new THREE.Vector3((lm.x-0.5)*0.4,(0.5-lm.y)*0.4,-lm.z*0.4);
+      const sphere = new THREE.Mesh(tipGeom, tipMat);
+      sphere.position.copy(pos);
+      scene.add(sphere); tips.push(sphere);
+
+      const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints([palm,pos]), lineMat);
+      scene.add(line); fingerLines.push(line);
+    });
+
+    // pinch draw
+    const thumb = landmarks[4], index = landmarks[8];
+    const thumbPos = new THREE.Vector3((thumb.x-0.5)*0.4,(0.5-thumb.y)*0.4,-thumb.z*0.4);
+    const indexPos = new THREE.Vector3((index.x-0.5)*0.4,(0.5-index.y)*0.4,-index.z*0.4);
+
+    if(distance(thumbPos,indexPos)<0.03){
+      if(!drawing){
+        drawing=true; drawPoints=[];
+        const geom = new THREE.BufferGeometry();
+        currentLine = new THREE.Line(geom, drawMaterial);
+        scene.add(currentLine);
+        drawnObjects.push(currentLine);
+      }
+      const mid = thumbPos.clone().add(indexPos).multiplyScalar(0.5);
+      drawPoints.push(mid);
+      const smoothPoints = smoothLine(drawPoints);
+      currentLine.geometry.setFromPoints(smoothPoints);
+    } else {
+      drawing=false; currentLine=null; drawPoints=[];
+    }
+
+    // thumbs down clear
+    if(isThumbsDown(landmarks)){
+      drawnObjects.forEach(o=>scene.remove(o));
+      drawnObjects=[];
+      console.log('Cleared drawings by thumbs down!');
+    }
+  });
+}
+
+renderer.setAnimationLoop(()=>{
+  renderer.render(scene,camera);
+});
+</script>
+
+</body>
+</html>
