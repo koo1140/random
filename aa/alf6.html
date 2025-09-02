@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8"/>
+<title>3D Room Scanner</title>
+<style>
+  body { margin:0; overflow:hidden; }
+  #ui {
+    position:absolute; top:0; left:0; right:0;
+    max-height:40%; overflow-y:auto;
+    background:rgba(0,0,0,0.6); color:#fff; padding:8px;
+    font-family:sans-serif; z-index:10;
+  }
+  canvas { display:block; }
+</style>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.150.1/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.150.1/examples/jsm/"
+  }
+}
+</script>
+</head>
+<body>
+<div id="ui">
+  <button id="startBtn">Start</button>
+  <button id="addFloorBtn" disabled>Add Floor Point</button>
+  <button id="addCeilBtn" disabled>Add Ceiling Point</button>
+  <button id="resetBtn">Reset</button><br>
+  <input type="file" id="photoInput"><br>
+</div>
+<script type="module">
+import * as THREE from "three";
+import { DeviceOrientationControls } from "three/addons/controls/DeviceOrientationControls.js";
+
+let scene = new THREE.Scene();
+let camera = new THREE.PerspectiveCamera(75, innerWidth/innerHeight, 0.01, 1000);
+camera.position.set(0,1.6,3);
+
+let renderer = new THREE.WebGLRenderer({antialias:true});
+renderer.setSize(innerWidth, innerHeight);
+document.body.appendChild(renderer.domElement);
+
+// helpers
+scene.add(new THREE.GridHelper(10,10));
+scene.add(new THREE.AxesHelper(1));
+
+// phone object that tracks orientation
+let phone = new THREE.Object3D();
+scene.add(phone);
+
+let controls = new DeviceOrientationControls(phone);
+controls.connect();
+
+let arrow = new THREE.ArrowHelper(new THREE.Vector3(0,0,-1), phone.position, 1, 0xff0000);
+scene.add(arrow);
+
+let points=[], lines=[];
+let lineMat = new THREE.LineBasicMaterial({color:0xffff00});
+
+// functions
+function addPoint(isCeil=false){
+  let pos = phone.position.clone();
+  if(isCeil) pos.y += 2.5; // example ceiling height
+  let geom = new THREE.SphereGeometry(0.05,8,8);
+  let mat = new THREE.MeshBasicMaterial({color: isCeil?0x00ffff:0x00ff00});
+  let sphere = new THREE.Mesh(geom,mat);
+  sphere.position.copy(pos);
+  scene.add(sphere);
+  points.push(pos);
+  if(points.length>1){
+    let geomLine = new THREE.BufferGeometry().setFromPoints([points[points.length-2], pos]);
+    let line = new THREE.Line(geomLine,lineMat);
+    scene.add(line);
+    lines.push(line);
+  }
+}
+
+// UI
+document.getElementById("startBtn").onclick=()=>{
+  document.getElementById("addFloorBtn").disabled=false;
+  document.getElementById("addCeilBtn").disabled=false;
+};
+document.getElementById("addFloorBtn").onclick=()=>addPoint(false);
+document.getElementById("addCeilBtn").onclick=()=>addPoint(true);
+document.getElementById("resetBtn").onclick=()=>{
+  points=[]; lines.forEach(l=>scene.remove(l)); lines=[];
+};
+
+// animate
+function animate(){
+  requestAnimationFrame(animate);
+  controls.update();
+
+  // update arrow to show phone forward direction (back of phone)
+  let forward = new THREE.Vector3(0,0,-1);
+  forward.applyQuaternion(phone.quaternion);
+  arrow.setDirection(forward.normalize());
+  arrow.position.copy(phone.position);
+
+  renderer.render(scene,camera);
+}
+animate();
+
+</script>
+</body>
+</html>
