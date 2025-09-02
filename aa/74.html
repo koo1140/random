@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Inline AR Hand Visualization</title>
+<style>
+  body { margin:0; overflow:hidden; }
+  #startButton { position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); padding:12px 24px; font-size:16px; z-index:10; }
+</style>
+</head>
+<body>
+
+<button id="startButton">Start AR</button>
+<video id="video" autoplay playsinline style="display:none;"></video>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.154.0/build/three.module.js",
+    "hands": "https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import {Hands} from 'hands';
+
+// Three.js setup
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera();
+const renderer = new THREE.WebGLRenderer({antialias:true, alpha:true});
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.xr.enabled = true;
+renderer.xr.setReferenceSpaceType('local');
+document.body.appendChild(renderer.domElement);
+
+const video = document.getElementById('video');
+const startButton = document.getElementById('startButton');
+
+let jointSpheres = [];
+let boneLines = [];
+
+const jointGeom = new THREE.SphereGeometry(0.01,8,8);
+const jointMat = new THREE.MeshNormalMaterial();
+const boneMat = new THREE.LineBasicMaterial({color:0x00ff00});
+
+// Helper for finger connections (Mediapipe landmark indices)
+const fingers = [
+    [0,1,2,3,4], // thumb
+    [0,5,6,7,8], // index
+    [0,9,10,11,12], // middle
+    [0,13,14,15,16], // ring
+    [0,17,18,19,20] // pinky
+];
+
+// Start button
+startButton.onclick = async () => {
+    // Get camera
+    const stream = await navigator.mediaDevices.getUserMedia({video:{facingMode:"environment"}});
+    video.srcObject = stream;
+
+    // Start inline XR
+    if(!navigator.xr){ alert("WebXR not supported"); return; }
+    const session = await navigator.xr.requestSession('inline', {requiredFeatures:['local-floor']});
+    renderer.xr.setSession(session);
+    startButton.style.display = 'none';
+
+    // Mediapipe Hands
+    const hands = new Hands({locateFile: (file)=>`https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`});
+    hands.setOptions({maxNumHands:2,modelComplexity:1});
+    hands.onResults(onHands);
+
+    async function detectHands(){
+        await hands.send({image:video});
+        requestAnimationFrame(detectHands);
+    }
+    detectHands();
+};
+
+// Callback from Mediapipe Hands
+function onHands(results){
+    // Remove previous
+    jointSpheres.forEach(s=>scene.remove(s));
+    jointSpheres=[];
+    boneLines.forEach(l=>scene.remove(l));
+    boneLines=[];
+
+    if(!results.multiHandLandmarks) return;
+
+    results.multiHandLandmarks.forEach(landmarks=>{
+        // Draw joints
+        landmarks.forEach(lm=>{
+            const sphere = new THREE.Mesh(jointGeom,jointMat);
+            sphere.position.set((lm.x-0.5)*2, (0.5-lm.y)*2, -lm.z); // simple normalized
+            scene.add(sphere);
+            jointSpheres.push(sphere);
+        });
+        // Draw bones
+        fingers.forEach(finger=>{
+            for(let i=0;i<finger.length-1;i++){
+                const a = landmarks[finger[i]];
+                const b = landmarks[finger[i+1]];
+                const points = [
+                    new THREE.Vector3((a.x-0.5)*2,(0.5-a.y)*2,-a.z),
+                    new THREE.Vector3((b.x-0.5)*2,(0.5-b.y)*2,-b.z)
+                ];
+                const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints(points), boneMat);
+                scene.add(line);
+                boneLines.push(line);
+            }
+        });
+    });
+}
+
+// Render loop
+renderer.setAnimationLoop(()=>{
+    renderer.render(scene,camera);
+});
+</script>
+</body>
+</html>
