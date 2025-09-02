@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AR Photo Scanner</title>
+<style>
+  body { margin:0; overflow:hidden; }
+  #takePhoto { position:absolute; bottom:20px; left:50%; transform:translateX(-50%); padding:10px 20px; font-size:16px; z-index:10; }
+</style>
+</head>
+<body>
+<button id="takePhoto">Take Photo</button>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.154.0/build/three.module.js"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from "three";
+
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera();
+const renderer = new THREE.WebGLRenderer({antialias:true, alpha:true});
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.xr.enabled = true;
+renderer.xr.setReferenceSpaceType('local');
+document.body.appendChild(renderer.domElement);
+
+// --- Video texture to capture camera frames ---
+const video = document.createElement('video');
+video.autoplay = true;
+video.playsInline = true;
+video.style.display = 'none';
+document.body.appendChild(video);
+
+navigator.mediaDevices.getUserMedia({video:{facingMode:"environment"}})
+.then(stream=>{ video.srcObject = stream; })
+.catch(err=>{ console.error(err); });
+
+// --- Enter AR session automatically ---
+async function startAR(){
+  if(navigator.xr){
+    const session = await navigator.xr.requestSession('immersive-ar',{requiredFeatures:['local-floor']});
+    renderer.xr.setSession(session);
+  }else{
+    alert("WebXR not supported");
+  }
+}
+startAR();
+
+// --- Take photo ---
+const takePhotoButton = document.getElementById('takePhoto');
+takePhotoButton.onclick = ()=>{
+  if(!video.videoWidth) return;
+
+  // 1. Capture video frame as texture
+  const canvas = document.createElement('canvas');
+  canvas.width = video.videoWidth;
+  canvas.height = video.videoHeight;
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(video,0,0,canvas.width,canvas.height);
+  const texture = new THREE.Texture(canvas);
+  texture.needsUpdate = true;
+
+  // 2. Create a plane
+  const aspect = canvas.width/canvas.height;
+  const height = 1; // 1 meter high
+  const width = height * aspect;
+  const geometry = new THREE.PlaneGeometry(width,height);
+  const material = new THREE.MeshBasicMaterial({map:texture, side:THREE.DoubleSide});
+  const plane = new THREE.Mesh(geometry, material);
+
+  // 3. Get camera pose
+  const xrCamera = renderer.xr.getCamera(camera);
+  plane.position.copy(xrCamera.position);
+  plane.quaternion.copy(xrCamera.quaternion); // orient plane like camera
+  scene.add(plane);
+}
+
+// --- Render loop ---
+renderer.setAnimationLoop(()=>{
+  renderer.render(scene, camera);
+});
+</script>
+</body>
+</html>
