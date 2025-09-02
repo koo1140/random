@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>World-Fixed AR Demo</title>
+<style>
+  html, body { margin:0; padding:0; overflow:hidden; height:100%; background:black;}
+  #camera { position:fixed; top:0; left:0; width:100%; height:100%; object-fit:cover; z-index:-1; }
+  #start_demo { position: fixed; top: 10px; left: 10px; padding: 10px 20px; background:green; color:white; border:none; border-radius:5px; font-size:16px; z-index:10; }
+  #start_demo.btn-danger { background:red; }
+  #debug { position:fixed; bottom:10px; left:10px; color:white; font-size:12px; background:rgba(0,0,0,0.5); padding:5px; border-radius:5px; max-height:30%; overflow:auto; }
+  #debug span { display:block; }
+</style>
+</head>
+<body>
+
+<video id="camera" autoplay playsinline></video>
+<button id="start_demo" class="btn-success">Start Demo</button>
+
+<div id="debug">
+  <span id="Orientation_a">alpha: 0</span>
+  <span id="Orientation_b">beta: 0</span>
+  <span id="Orientation_g">gamma: 0</span>
+  <span id="Accelerometer_gx">gx: 0</span>
+  <span id="Accelerometer_gy">gy: 0</span>
+  <span id="Accelerometer_gz">gz: 0</span>
+  <span id="Accelerometer_x">x: 0</span>
+  <span id="Accelerometer_y">y: 0</span>
+  <span id="Accelerometer_z">z: 0</span>
+  <span id="Accelerometer_i">interval: 0</span>
+  <span id="Gyroscope_z">gz: 0</span>
+  <span id="Gyroscope_x">gx: 0</span>
+  <span id="Gyroscope_y">gy: 0</span>
+  <span id="num-observed-events">0</span>
+</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.154.0/build/three.module.js"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from "three";
+
+// --- Camera feed ---
+navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } })
+.then(stream => { document.getElementById("camera").srcObject = stream; })
+.catch(err => { console.error("Camera error:", err); });
+
+// --- Three.js setup ---
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
+const renderer = new THREE.WebGLRenderer({antialias:true, alpha:true});
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.setClearColor(0x000000,0);
+document.body.appendChild(renderer.domElement);
+
+window.addEventListener("resize", () => {
+  camera.aspect = window.innerWidth/window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+
+// --- World-fixed objects ---
+const cube = new THREE.Mesh(new THREE.BoxGeometry(0.5,0.5,0.5), new THREE.MeshNormalMaterial());
+cube.position.set(0,0,-3); // fixed position in world space
+scene.add(cube);
+
+// --- Debug / sensor helpers ---
+function updateFieldIfNotNull(fieldName, value, precision=10){
+  if(value!=null) document.getElementById(fieldName).innerHTML = value.toFixed(precision);
+}
+function incrementEventCount(){
+  const c = document.getElementById("num-observed-events");
+  c.innerHTML = parseInt(c.innerHTML)+1;
+}
+
+// --- Sensor handling ---
+function handleOrientation(e){
+  updateFieldIfNotNull('Orientation_a', e.alpha);
+  updateFieldIfNotNull('Orientation_b', e.beta);
+  updateFieldIfNotNull('Orientation_g', e.gamma);
+
+  // Camera rotation (world-fixed cube)
+  const alpha = THREE.MathUtils.degToRad(e.alpha || 0);
+  const beta  = THREE.MathUtils.degToRad(e.beta || 0);
+  const gamma = THREE.MathUtils.degToRad(e.gamma || 0);
+  camera.rotation.set(beta, alpha, -gamma, 'ZYX');
+  incrementEventCount();
+}
+
+function handleMotion(e){
+  updateFieldIfNotNull('Accelerometer_gx', e.accelerationIncludingGravity.x);
+  updateFieldIfNotNull('Accelerometer_gy', e.accelerationIncludingGravity.y);
+  updateFieldIfNotNull('Accelerometer_gz', e.accelerationIncludingGravity.z);
+  updateFieldIfNotNull('Accelerometer_x', e.acceleration.x);
+  updateFieldIfNotNull('Accelerometer_y', e.acceleration.y);
+  updateFieldIfNotNull('Accelerometer_z', e.acceleration.z);
+  updateFieldIfNotNull('Accelerometer_i', e.interval, 2);
+  updateFieldIfNotNull('Gyroscope_z', e.rotationRate.alpha);
+  updateFieldIfNotNull('Gyroscope_x', e.rotationRate.beta);
+  updateFieldIfNotNull('Gyroscope_y', e.rotationRate.gamma);
+  incrementEventCount();
+}
+
+// --- Start/Stop demo ---
+let is_running=false;
+const demo_btn = document.getElementById("start_demo");
+demo_btn.onclick = async (e)=>{
+  e.preventDefault();
+  if(DeviceMotionEvent && typeof DeviceMotionEvent.requestPermission==="function"){
+    await DeviceMotionEvent.requestPermission();
+  }
+  if(is_running){
+    window.removeEventListener("devicemotion", handleMotion);
+    window.removeEventListener("deviceorientation", handleOrientation);
+    demo_btn.innerHTML="Start Demo";
+    demo_btn.classList.add('btn-success');
+    demo_btn.classList.remove('btn-danger');
+    is_running=false;
+  }else{
+    window.addEventListener("devicemotion", handleMotion);
+    window.addEventListener("deviceorientation", handleOrientation);
+    demo_btn.innerHTML="Stop Demo";
+    demo_btn.classList.remove('btn-success');
+    demo_btn.classList.add('btn-danger');
+    is_running=true;
+  }
+};
+
+// --- Render loop ---
+function animate(){
+  requestAnimationFrame(animate);
+  renderer.render(scene, camera);
+}
+animate();
+</script>
+</body>
+</html>
