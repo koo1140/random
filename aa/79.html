@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Handpose Three.js Visualization</title>
+<style>
+  body { margin:0; overflow:hidden; }
+</style>
+</head>
+<body>
+
+<video id="video" autoplay playsinline style="display:none;"></video>
+
+<script type="module">
+import * as THREE from 'https://unpkg.com/three@0.154.0/build/three.module.js';
+import * as handpose from 'https://cdn.jsdelivr.net/npm/@tensorflow-models/handpose/dist/handpose.min.js';
+import '@tensorflow/tfjs-backend-webgl';
+
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(70, window.innerWidth/window.innerHeight, 0.01, 10);
+camera.position.z = 0.5;
+
+const renderer = new THREE.WebGLRenderer({antialias:true, alpha:true});
+renderer.setSize(window.innerWidth, window.innerHeight);
+document.body.appendChild(renderer.domElement);
+
+const video = document.getElementById('video');
+navigator.mediaDevices.getUserMedia({video:{facingMode:"environment"}})
+.then(stream => video.srcObject = stream)
+.catch(err => console.error(err));
+
+// Three.js objects
+let jointSpheres = [];
+let boneLines = [];
+const jointGeom = new THREE.SphereGeometry(0.01,8,8);
+const jointMat = new THREE.MeshNormalMaterial();
+const boneMat = new THREE.LineBasicMaterial({color:0x00ff00});
+
+// Finger connections for 21 landmarks (Handpose)
+const fingers = [
+    [0,1,2,3,4],    // Thumb
+    [0,5,6,7,8],    // Index
+    [0,9,10,11,12], // Middle
+    [0,13,14,15,16], // Ring
+    [0,17,18,19,20]  // Pinky
+];
+
+// Load handpose model
+let model;
+handpose.load().then(m=>{
+    model = m;
+    detectHands();
+});
+
+// Detection loop
+async function detectHands(){
+    if(!model || video.readyState < 2){
+        requestAnimationFrame(detectHands);
+        return;
+    }
+
+    const predictions = await model.estimateHands(video, true);
+    
+    // Clear previous
+    jointSpheres.forEach(s=>scene.remove(s)); jointSpheres=[];
+    boneLines.forEach(l=>scene.remove(l)); boneLines=[];
+
+    predictions.forEach(hand=>{
+        const landmarks = hand.landmarks; // array of 21 [x,y,z]
+        // Draw joints
+        landmarks.forEach(lm=>{
+            const sphere = new THREE.Mesh(jointGeom,jointMat);
+            sphere.position.set((lm[0]/video.videoWidth-0.5)*0.5, (0.5-lm[1]/video.videoHeight)*0.5, -lm[2]*0.5);
+            scene.add(sphere); jointSpheres.push(sphere);
+        });
+        // Draw bones
+        fingers.forEach(finger=>{
+            for(let i=0;i<finger.length-1;i++){
+                const a=landmarks[finger[i]];
+                const b=landmarks[finger[i+1]];
+                const points=[
+                    new THREE.Vector3((a[0]/video.videoWidth-0.5)*0.5,(0.5-a[1]/video.videoHeight)*0.5,-a[2]*0.5),
+                    new THREE.Vector3((b[0]/video.videoWidth-0.5)*0.5,(0.5-b[1]/video.videoHeight)*0.5,-b[2]*0.5)
+                ];
+                const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints(points), boneMat);
+                scene.add(line); boneLines.push(line);
+            }
+        });
+    });
+
+    requestAnimationFrame(detectHands);
+}
+
+// Render loop
+renderer.setAnimationLoop(()=>renderer.render(scene,camera));
+</script>
+</body>
+</html>
