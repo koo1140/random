@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AR Photo Scanner with Virtual Background</title>
+<style>
+  body { margin:0; overflow:hidden; }
+</style>
+</head>
+<body>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.154.0/build/three.module.js"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from "three";
+
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera();
+const renderer = new THREE.WebGLRenderer({antialias:true, alpha:true});
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.xr.enabled = true;
+renderer.xr.setReferenceSpaceType('local');
+document.body.appendChild(renderer.domElement);
+
+// --- Enter AR Button ---
+const button = document.createElement('button');
+button.style.position = 'absolute';
+button.style.top = '50%';
+button.style.left = '50%';
+button.style.transform = 'translate(-50%,-50%)';
+button.style.padding = '12px 24px';
+button.style.fontSize = '16px';
+button.innerText = 'Start AR';
+document.body.appendChild(button);
+
+button.onclick = async ()=>{
+    const session = await navigator.xr.requestSession('immersive-ar',{requiredFeatures:['local-floor']});
+    renderer.xr.setSession(session);
+    button.style.display = 'none';
+
+    // Add virtual background plane in front of camera
+    const bgGeometry = new THREE.PlaneGeometry(10,10); // large plane
+    const bgMaterial = new THREE.MeshBasicMaterial({color:0x333333, side:THREE.DoubleSide});
+    const bgPlane = new THREE.Mesh(bgGeometry, bgMaterial);
+    bgPlane.position.set(0,0,-0.5); // 50cm in front of camera
+    camera.add(bgPlane); // attach to camera
+    scene.add(camera);
+};
+
+// --- Tap to capture planes ---
+renderer.domElement.addEventListener('click', ()=>{
+    const width = 1; 
+    const height = 0.75; 
+    const geometry = new THREE.PlaneGeometry(width,height);
+    const material = new THREE.MeshBasicMaterial({color:Math.random()*0xffffff, side:THREE.DoubleSide});
+    const plane = new THREE.Mesh(geometry, material);
+
+    const xrCamera = renderer.xr.getCamera(camera);
+    plane.position.copy(xrCamera.position);
+    plane.quaternion.copy(xrCamera.quaternion);
+
+    // Slightly in front of virtual background
+    const forward = new THREE.Vector3(0,0,-0.1).applyQuaternion(plane.quaternion);
+    plane.position.add(forward);
+
+    scene.add(plane);
+});
+
+// --- Render loop ---
+renderer.setAnimationLoop(()=>{
+    renderer.render(scene, camera);
+});
+</script>
+</body>
+</html>
