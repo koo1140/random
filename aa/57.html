@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Immersive AR Photo Scanner</title>
+<style>
+  body { margin:0; overflow:hidden; }
+  #startButton {
+    position:absolute; top:50%; left:50%; transform:translate(-50%,-50%);
+    padding:12px 24px; font-size:16px; z-index:10;
+  }
+</style>
+</head>
+<body>
+
+<button id="startButton">Start AR</button>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.154.0/build/three.module.js"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from "three";
+
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera();
+const renderer = new THREE.WebGLRenderer({antialias:true, alpha:true});
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.xr.enabled = true;
+renderer.xr.setReferenceSpaceType('local');
+document.body.appendChild(renderer.domElement);
+
+// --- Video stream for capture ---
+const video = document.createElement('video');
+video.autoplay = true;
+video.playsInline = true;
+video.style.display = 'none';
+document.body.appendChild(video);
+
+navigator.mediaDevices.getUserMedia({video:{facingMode:"environment"}})
+.then(stream => { video.srcObject = stream; })
+.catch(err => console.error(err));
+
+const startButton = document.getElementById('startButton');
+startButton.onclick = async () => {
+    if(!navigator.xr){ alert("WebXR not supported"); return; }
+
+    const session = await navigator.xr.requestSession('immersive-ar', {requiredFeatures:['local-floor']});
+    renderer.xr.setSession(session);
+    startButton.style.display = 'none';
+
+    // --- Virtual background plane ---
+    const bgGeometry = new THREE.PlaneGeometry(10,10);
+    const bgMaterial = new THREE.MeshBasicMaterial({color:0x333333, side:THREE.DoubleSide});
+    const bgPlane = new THREE.Mesh(bgGeometry, bgMaterial);
+    bgPlane.position.set(0,0,-0.5); // 50cm in front of camera
+    camera.add(bgPlane);
+    scene.add(camera);
+
+    // --- Handle tap (select) event ---
+    session.addEventListener('select', ()=>{
+        if(!video.videoWidth) return;
+
+        // Capture frame
+        const canvas = document.createElement('canvas');
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(video,0,0,canvas.width,canvas.height);
+
+        const texture = new THREE.Texture(canvas);
+        texture.needsUpdate = true;
+
+        const aspect = canvas.width / canvas.height;
+        const height = 1;
+        const width = height * aspect;
+        const geometry = new THREE.PlaneGeometry(width, height);
+        const material = new THREE.MeshBasicMaterial({map:texture, side:THREE.DoubleSide});
+        const plane = new THREE.Mesh(geometry, material);
+
+        // Place plane at camera position
+        const xrCamera = renderer.xr.getCamera(camera);
+        plane.position.copy(xrCamera.position);
+        plane.quaternion.copy(xrCamera.quaternion);
+
+        // Slightly in front of background
+        const forward = new THREE.Vector3(0,0,-0.1).applyQuaternion(plane.quaternion);
+        plane.position.add(forward);
+
+        scene.add(plane);
+    });
+};
+
+// --- Render loop ---
+renderer.setAnimationLoop(()=>{
+    renderer.render(scene, camera);
+});
+</script>
+</body>
+</html>
