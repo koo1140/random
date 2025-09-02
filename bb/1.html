@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Phone Sensor AR</title>
+<style>
+body { margin:0; overflow:hidden; background:#000; font-family:monospace; }
+#ui { position:absolute; top:10px; left:10px; color:#0f0; z-index:10; }
+button { font-size:18px; padding:10px; }
+</style>
+</head>
+<body>
+<div id="ui">
+  <button id="startBtn">Start AR</button>
+  <pre id="log">Waiting...</pre>
+</div>
+<script type="module">
+import * as THREE from 'https://unpkg.com/three@0.150.1/build/three.module.js';
+
+let scene = new THREE.Scene();
+let camera = new THREE.PerspectiveCamera(75, innerWidth/innerHeight, 0.01, 100);
+let renderer = new THREE.WebGLRenderer({antialias:true});
+renderer.setSize(innerWidth, innerHeight);
+document.body.appendChild(renderer.domElement);
+
+// Grid (floor)
+const grid = new THREE.GridHelper(10, 10, 0x00ff00, 0x008800);
+scene.add(grid);
+
+// Red cubes for depth
+for(let x=-2;x<=2;x+=2){
+  for(let z=-2;z<=2;z+=2){
+    const geo = new THREE.BoxGeometry(0.2,0.2,0.2);
+    const mat = new THREE.MeshStandardMaterial({color:0xff0000});
+    const cube = new THREE.Mesh(geo, mat);
+    cube.position.set(x,0.1,z);
+    scene.add(cube);
+  }
+}
+
+// Light
+scene.add(new THREE.HemisphereLight(0xffffff,0x444444,1));
+
+// Camera starting position
+camera.position.set(0,1.6,2);
+
+let velocity = new THREE.Vector3();
+let lastTime = null;
+
+// Logging
+const logEl = document.getElementById('log');
+
+// Device handlers
+function handleOrientation(e){
+  if(e.alpha===null) return;
+  const alpha = THREE.MathUtils.degToRad(e.alpha||0);
+  const beta  = THREE.MathUtils.degToRad(e.beta||0);
+  const gamma = THREE.MathUtils.degToRad(e.gamma||0);
+  const euler = new THREE.Euler(beta, alpha, -gamma, 'YXZ');
+  camera.quaternion.setFromEuler(euler);
+  logEl.textContent = `Orientation:\nα=${e.alpha.toFixed(2)} β=${e.beta.toFixed(2)} γ=${e.gamma.toFixed(2)}`;
+}
+
+function handleMotion(e){
+  const now = performance.now();
+  if(lastTime!==null && e.acceleration){
+    const dt = (now-lastTime)/1000;
+    let acc = new THREE.Vector3(
+      e.acceleration.x||0,
+      e.acceleration.y||0,
+      e.acceleration.z||0
+    );
+    acc.applyQuaternion(camera.quaternion);   // to world space
+    velocity.addScaledVector(acc, dt);
+    velocity.multiplyScalar(0.95);            // damping
+    camera.position.addScaledVector(velocity, dt);
+    logEl.textContent += `\nPos: x=${camera.position.x.toFixed(2)} y=${camera.position.y.toFixed(2)} z=${camera.position.z.toFixed(2)}`;
+  }
+  lastTime = now;
+}
+
+// Start button
+const startBtn = document.getElementById('startBtn');
+startBtn.onclick = async ()=>{
+  startBtn.style.display='none';
+  
+  // iOS permission
+  if(DeviceOrientationEvent && typeof DeviceOrientationEvent.requestPermission==='function'){
+    try{ await DeviceOrientationEvent.requestPermission(); } catch(e){ alert('Permission denied'); return; }
+  }
+  if(DeviceMotionEvent && typeof DeviceMotionEvent.requestPermission==='function'){
+    try{ await DeviceMotionEvent.requestPermission(); } catch(e){ alert('Permission denied'); return; }
+  }
+
+  window.addEventListener('deviceorientation', handleOrientation);
+  window.addEventListener('devicemotion', handleMotion);
+};
+
+// Render loop
+function animate(){
+  requestAnimationFrame(animate);
+  renderer.render(scene,camera);
+}
+animate();
+
+// Resize
+window.addEventListener('resize',()=>{
+  camera.aspect = innerWidth/innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth,innerHeight);
+});
+</script>
+</body>
+</html>
