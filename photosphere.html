@@ -1,0 +1,609 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>360 Photosphere Viewer — Single File</title>
+<!-- Import map for three.js + addons -->
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.180.0/examples/jsm/"
+  }
+}
+</script>
+
+  <script src="https://cdn.jsdelivr.net/npm/uevent@2/browser.min.js"></script>
+  <style>
+    :root {
+      --bg: #0b0f14; --panel: #121821; --muted: #94a3b8; --text: #e5eefb; --accent: #60a5fa; --accent2:#34d399;
+      --border: #202938; --shadow: 0 8px 24px rgba(0,0,0,.35);
+    }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; background: var(--bg); color: var(--text); font: 14px/1.4 system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, sans-serif; }
+    /* layout toggles */
+    body.sidebar-hidden { grid-template-columns: 0 1fr; }
+    body.header-hidden { grid-template-rows: 0 1fr; }
+    body.header-hidden header { display: none; }
+
+    body { margin: 0; display: grid; grid-template-columns: 300px 1fr; grid-template-rows: auto 1fr; grid-template-areas: 'header header' 'sidebar viewer'; }
+    header { grid-area: header; display:flex; gap:12px; align-items:center; padding:12px 16px; border-bottom:1px solid var(--border); background: linear-gradient(180deg,#0d1420,#0b0f14); position: sticky; top:0; z-index:20; }
+    header h1 { font-size: 16px; margin: 0; letter-spacing:.3px; opacity:.95; }
+    header .spacer { flex: 1; }
+    .btn { background: #0f1722; border:1px solid var(--border); color: var(--text); padding:8px 12px; border-radius:10px; cursor:pointer; box-shadow: var(--shadow); transition: .15s ease-in-out; }
+    .btn:hover { border-color: #2b364a; transform: translateY(-1px); }
+    .btn.accent { background: linear-gradient(135deg, #3b82f6, #22d3ee); border-color: transparent; color: white; font-weight: 600; }
+    .btn.small { padding:6px 10px; font-size: 12px; }
+
+    aside { grid-area: sidebar; border-right:1px solid var(--border); background: var(--panel); padding:12px; overflow:auto; }
+    #viewer { grid-area: viewer; position: relative; }
+    #psv { position: absolute; inset: 0; }
+
+    .section { margin-bottom: 12px; }
+    .section h3 { margin: 10px 0 6px; font-size: 12px; text-transform: uppercase; letter-spacing: .12em; color: var(--muted); }
+    .row { display:flex; gap:6px; flex-wrap: wrap; }
+
+    .scene-list { list-style:none; padding:0; margin:0; display:flex; flex-direction:column; gap:6px; }
+    .scene { background:#0f1622; border:1px solid var(--border); padding:8px; border-radius:10px; display:flex; justify-content:space-between; align-items:center; }
+    .scene.active { outline:2px solid var(--accent); }
+    .scene .name { font-weight:600; }
+
+    .statusbar { position: absolute; left: 12px; bottom: 12px; background: rgba(4,10,20,.7); border:1px solid var(--border); padding: 6px 10px; border-radius: 10px; color: var(--muted); backdrop-filter: blur(6px); }
+
+    .modal { position: fixed; inset: 0; display:none; align-items: center; justify-content: center; background: rgba(0,0,0,.5); z-index: 50; }
+    .modal .card { width: min(520px, 92vw); background: #0f1622; border: 1px solid var(--border); border-radius: 14px; box-shadow: var(--shadow); padding: 14px; }
+    .modal .card h2 { margin: 0 0 8px; font-size: 16px; }
+    .field { margin: 8px 0; display:flex; flex-direction:column; gap:6px; }
+    label { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .1em; }
+    input[type="text"], select, textarea { background: #0b1220; color: var(--text); border:1px solid var(--border); border-radius: 10px; padding: 8px 10px; }
+    .card .actions { display:flex; justify-content:flex-end; gap:8px; margin-top: 10px; }
+
+    .hint { color: var(--muted); font-size: 12px; }
+    .pill { display:inline-flex; align-items:center; gap:6px; padding:4px 8px; border-radius:999px; background:#0f1722; border:1px solid var(--border); }
+    .link { color: var(--accent2); cursor:pointer; text-decoration: underline; }
+
+    /* Toggle buttons */
+    .toggle-btn {
+      position: absolute; top: 12px; left: 12px;
+      z-index: 30; padding: 6px 10px;
+      font-size: 12px; background: #0f1722; border:1px solid var(--border);
+      border-radius: 8px; color: var(--text); cursor:pointer;
+      box-shadow: var(--shadow);
+    }
+    .toggle-btn[aria-pressed="true"] { outline: 2px solid var(--accent); }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>360 Photosphere Viewer — Single File (Hotspots + Multi-Scene)</h1>
+    <span class="spacer"></span>
+    <button id="btnImport" class="btn">Import Project</button>
+    <button id="btnExport" class="btn">Export Project</button>
+    <button id="btnHelp" class="btn small">Help</button>
+  </header>
+
+  <aside>
+    <div class="section">
+      <h3>Scenes</h3>
+      <div class="row">
+        <input id="fileInput" type="file" accept="image/*" hidden />
+        <button id="btnAddScene" class="btn accent">+ Add Photosphere</button>
+      </div>
+      <p class="hint">Add equirectangular JPG/PNG (2:1 aspect, e.g. 8000×4000).</p>
+      <ul id="sceneList" class="scene-list"></ul>
+    </div>
+
+    <div class="section">
+  <h3>Hotspots</h3>
+  <div class="row">
+    <button id="btnAddHotspot" class="btn">+ New Hotspot</button>
+    <button id="btnToggleCoords" class="btn">Show Coords</button>
+  </div>
+  <ul id="hotspotList" class="scene-list"></ul>
+  <p class="hint">Click a hotspot in the list to edit it.</p>
+</div>
+
+
+    <div class="section">
+      <h3>Project</h3>
+      <div class="row">
+        <button id="btnSetStart" class="btn small">Set Start Scene</button>
+        <button id="btnClear" class="btn small">Reset</button>
+      </div>
+      <p class="hint">Everything stays in your browser. Export to a single JSON to save/share.</p>
+    </div>
+  </aside>
+
+  <main id="viewer">
+    <div id="psv"></div>
+    <div class="statusbar" id="status">No scene loaded. Add a photosphere.</div>
+
+    <!-- Toggle buttons inserted inside viewer per request -->
+    <button id="toggleSidebar" class="toggle-btn" aria-pressed="false">☰ Menu</button>
+    <button id="toggleHeader" class="toggle-btn" style="left:auto; right:12px;" aria-pressed="false">☰ Header</button>
+  </main>
+
+  <!-- Hotspot modal -->
+  <div id="hotspotModal" class="modal" role="dialog" aria-modal="true">
+    <div class="card">
+      <h2>Add Hotspot</h2>
+      <div class="field"><label>Label</label><input id="hsLabel" type="text" placeholder="e.g. Door to kitchen" /></div>
+      <div class="field"><label>Link to Scene</label>
+        <select id="hsTarget"></select>
+        <div class="hint">Optional. If set, clicking the hotspot switches to that scene.</div>
+      </div>
+      <div class="actions">
+        <button class="btn" id="hsCancel">Cancel</button>
+        <button class="btn accent" id="hsSave">Save Hotspot</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Help modal -->
+  <div id="helpModal" class="modal" role="dialog" aria-modal="true">
+    <div class="card">
+      <h2>How to use</h2>
+      <ol>
+        <li>Click <span class="pill">+ Add Photosphere</span> and choose an equirectangular image (2:1 ratio).</li>
+        <li>Switch between scenes from the list. The active one is highlighted.</li>
+        <li>Click <span class="pill">+ New Hotspot</span>, then click inside the viewer to place it.</li>
+        <li>Optionally link the hotspot to another scene for teleporting.</li>
+        <li>Click <span class="pill">Export Project</span> to save a single JSON file containing images + hotspots.</li>
+        <li>Later, use <span class="pill">Import Project</span> to continue editing.</li>
+      </ol>
+      <div class="actions">
+        <button class="btn accent" id="helpClose">Got it</button>
+      </div>
+    </div>
+  </div>
+
+<script type="module">
+/* Module-based three.js viewer + hotspots
+   Hotspots are fixed-size circle sprites, click-only activation.
+*/
+import * as THREE from "three";
+import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+
+
+/////////////////////
+// Data + UI hooks //
+/////////////////////
+const project = { startSceneId: null, scenes: {} };
+
+let currentSceneId = null;
+let renderer = null, scene = null, camera = null, controls = null, sphereMesh = null;
+const hotspotMeshes = new Map();
+let placingHotspot = false;
+let showCoords = false;
+
+// DOM elements (must exist in page)
+let temporaryRepositionHs = null; // global
+const hotspotListEl = document.getElementById('hotspotList');
+const el = {
+  psv: document.getElementById('psv'),
+  status: document.getElementById('status'),
+  sceneList: document.getElementById('sceneList'),
+  btnAddScene: document.getElementById('btnAddScene'),
+  fileInput: document.getElementById('fileInput'),
+  btnAddHotspot: document.getElementById('btnAddHotspot'),
+  btnToggleCoords: document.getElementById('btnToggleCoords'),
+  btnSetStart: document.getElementById('btnSetStart'),
+  btnClear: document.getElementById('btnClear'),
+  btnExport: document.getElementById('btnExport'),
+  btnImport: document.getElementById('btnImport'),
+  btnHelp: document.getElementById('btnHelp'),
+  helpModal: document.getElementById('helpModal'),
+  helpClose: document.getElementById('helpClose'),
+  hotspotModal: document.getElementById('hotspotModal'),
+  hsLabel: document.getElementById('hsLabel'),
+  hsTarget: document.getElementById('hsTarget'),
+  hsCancel: document.getElementById('hsCancel'),
+  hsSave: document.getElementById('hsSave'),
+};
+
+
+function openEditHotspotModal(hs) {
+  el.hotspotModal.style.display = 'flex';
+  el.hsLabel.value = hs.label || '';
+  refreshHotspotTargets();
+  el.hsTarget.value = hs.targetSceneId || '';
+  
+  // Save changes
+  el.hsSave.onclick = () => {
+    hs.label = el.hsLabel.value || hs.label;
+    hs.targetSceneId = el.hsTarget.value || null;
+    renderHotspots(project.scenes[currentSceneId].hotspots);
+    renderHotspotList();
+    el.hotspotModal.style.display = 'none';
+    toast('Hotspot updated.');
+  };
+
+  // Cancel
+  el.hsCancel.onclick = () => { el.hotspotModal.style.display = 'none'; };
+
+  // Add Delete button dynamically
+  const deleteBtn = document.createElement('button');
+  deleteBtn.className = 'btn';
+  deleteBtn.textContent = 'Delete';
+  deleteBtn.onclick = () => {
+    const sc = project.scenes[currentSceneId];
+    sc.hotspots = sc.hotspots.filter(h => h.id !== hs.id);
+    renderHotspots(sc.hotspots);
+    renderHotspotList();
+    el.hotspotModal.style.display = 'none';
+    toast('Hotspot deleted.');
+  };
+
+  const actionsDiv = el.hotspotModal.querySelector('.actions');
+  // remove previous dynamic delete button if any
+  actionsDiv.querySelectorAll('.btn.dynamic-delete').forEach(b => b.remove());
+  deleteBtn.classList.add('dynamic-delete');
+  actionsDiv.appendChild(deleteBtn);
+
+  // Reposition button
+  const repositionBtn = document.createElement('button');
+  repositionBtn.className = 'btn';
+  repositionBtn.textContent = 'Reposition';
+  repositionBtn.onclick = () => {
+    placingHotspot = true;
+    toast('Click inside viewer to set new position for this hotspot...');
+    el.hotspotModal.style.display = 'none';
+    // When user clicks, overwrite this hs object instead of creating new
+    temporaryRepositionHs = hs;
+  };
+  repositionBtn.classList.add('dynamic-delete');
+  actionsDiv.appendChild(repositionBtn);
+}
+
+function renderHotspotList() {
+  hotspotListEl.innerHTML = '';
+  if (!currentSceneId) return;
+  const sc = project.scenes[currentSceneId];
+  (sc.hotspots || []).forEach(hs => {
+    const li = document.createElement('li');
+    li.className = 'scene';
+    li.textContent = hs.label || 'Hotspot';
+    li.onclick = () => openEditHotspotModal(hs);
+    hotspotListEl.appendChild(li);
+  });
+}
+
+/////////////////////////
+// Three.js viewer API //
+/////////////////////////
+function initThree(container) {
+  if (renderer) return; // already inited
+  renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setPixelRatio(window.devicePixelRatio || 1);
+  renderer.setSize(container.clientWidth, container.clientHeight, false);
+  container.innerHTML = '';
+  container.appendChild(renderer.domElement);
+
+  scene = new THREE.Scene();
+  camera = new THREE.PerspectiveCamera(75, container.clientWidth / container.clientHeight, 0.1, 2000);
+  camera.position.set(0, 0, 0.1);
+
+  controls = new OrbitControls(camera, renderer.domElement);
+  controls.enableZoom = true;
+  controls.enablePan = false;
+  controls.rotateSpeed = -0.3;
+
+  window.addEventListener('resize', onWindowResize, { passive: true });
+  renderer.domElement.addEventListener('click', onClick, false);
+
+  animate();
+}
+
+function onWindowResize() {
+  if (!camera || !renderer || !el.psv) return;
+  camera.aspect = el.psv.clientWidth / el.psv.clientHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(el.psv.clientWidth, el.psv.clientHeight, false);
+}
+
+function animate() {
+  requestAnimationFrame(animate);
+  if (controls) controls.update();
+  if (renderer && scene && camera) renderer.render(scene, camera);
+}
+
+function cleanupSphere() {
+  if (!sphereMesh) return;
+  try {
+    scene.remove(sphereMesh);
+    if (sphereMesh.geometry) sphereMesh.geometry.dispose();
+    if (sphereMesh.material) {
+      if (sphereMesh.material.map) sphereMesh.material.map.dispose();
+      sphereMesh.material.dispose();
+    }
+  } catch (e) { console.warn('cleanup error', e); }
+  sphereMesh = null;
+}
+
+function loadPanorama(imgUrl) {
+  if (!el.psv) return;
+  if (!scene) initThree(el.psv);
+
+  cleanupSphere();
+
+  const loader = new THREE.TextureLoader();
+  loader.setCrossOrigin('anonymous');
+  loader.load(imgUrl,
+    (tex) => {
+      const geom = new THREE.SphereGeometry(500, 64, 64);
+      geom.scale(-1, 1, 1); // invert to view from inside
+      const mat = new THREE.MeshBasicMaterial({ map: tex });
+      sphereMesh = new THREE.Mesh(geom, mat);
+      scene.add(sphereMesh);
+
+      // re-render hotspots for current scene
+      const sc = project.scenes[currentSceneId];
+      renderHotspots(sc ? sc.hotspots || [] : []);
+    },
+    undefined,
+    (err) => {
+      console.error('Texture load error', err);
+      toast('Failed to load panorama image.');
+    }
+  );
+}
+
+////////////////////////
+// Hotspot utilities  //
+// Always draw as simple fixed-size circle sprite
+////////////////////////
+function yawPitchToVector3(yaw, pitch, radius = 500) {
+  // yaw, pitch in radians. yaw: rotation around Y (0 front), pitch: up/down
+  const y = radius * Math.sin(pitch);
+  const x = radius * Math.sin(yaw) * Math.cos(pitch);
+  const z = radius * Math.cos(yaw) * Math.cos(pitch);
+  return new THREE.Vector3(x, y, z);
+}
+
+function makeHotspotMesh(hs) {
+  const geom = new THREE.SphereGeometry(5, 16, 16); // 5 = radius in world units
+  const mat = new THREE.MeshBasicMaterial({ color: 0x50a0ff });
+  const mesh = new THREE.Mesh(geom, mat);
+
+  mesh.position.copy(yawPitchToVector3(hs.yaw, hs.pitch, 500));
+  mesh.userData = { ...hs };
+
+  // Prevent scaling with camera perspective
+  mesh.onBeforeRender = (renderer, scene, camera) => {
+    const scale = 5; // constant world size
+    mesh.scale.set(scale, scale, scale);
+  };
+
+  return mesh;
+}
+
+function renderHotspots(hotspots) {
+  hotspotMeshes.forEach(m => { scene.remove(m); });
+  hotspotMeshes.clear();
+
+  hotspots.forEach(hs => {
+    const mesh = makeHotspotMesh(hs);
+    scene.add(mesh);
+    hotspotMeshes.set(hs.id, mesh);
+  });
+}
+///////////////////////
+// Input & ray-cast  //
+///////////////////////
+const raycaster = new THREE.Raycaster();
+const mouse = new THREE.Vector2();
+
+function onClick(event) {
+  if (!renderer) return;
+  const rect = renderer.domElement.getBoundingClientRect();
+  mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+  mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+  raycaster.setFromCamera(mouse, camera);
+
+  const spriteObjs = Array.from(hotspotMeshes.values());
+  const hits = raycaster.intersectObjects(spriteObjs, false);
+
+  if (hits.length) {
+    const hs = hits[0].object.userData;
+    if (temporaryRepositionHs) {
+      // ignore clicking another hotspot while repositioning
+      return;
+    }
+    if (hs.targetSceneId && project.scenes[hs.targetSceneId]) {
+      loadScene(hs.targetSceneId);
+      return;
+    }
+  }
+
+  const dir = new THREE.Vector3();
+  raycaster.ray.direction.normalize();
+  dir.copy(raycaster.ray.direction);
+  const yaw = Math.atan2(dir.x, dir.z);
+  const pitch = Math.asin(dir.y / dir.length());
+
+  if (temporaryRepositionHs) {
+    // update the existing hotspot
+    temporaryRepositionHs.yaw = yaw;
+    temporaryRepositionHs.pitch = pitch;
+    renderHotspots(project.scenes[currentSceneId].hotspots);
+    temporaryRepositionHs = null;
+    toast('Hotspot repositioned.');
+  } else if (placingHotspot) {
+    placingHotspot = false;
+    openHotspotModal(yaw, pitch);
+  } else if (showCoords) {
+    toast(`yaw: ${yaw.toFixed(4)}, pitch: ${pitch.toFixed(4)}`);
+  }
+}
+
+/////////////////////
+// UI / Scenes etc //
+/////////////////////
+let toastTimer = null;
+function toast(msg) {
+  el.status.textContent = msg;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(updateStatus, 2500);
+}
+
+function updateStatus() {
+  if (!currentSceneId) { el.status.textContent = 'No scene loaded. Add a photosphere.'; return; }
+  const sc = project.scenes[currentSceneId];
+  el.status.innerHTML = `${sc.name} — <span class="hint">Hotspots: ${sc.hotspots?.length || 0}</span>`;
+}
+
+function addSceneFromFile(file) {
+  const reader = new FileReader();
+  reader.onload = () => {
+    const id = `scene_${Date.now()}_${Math.floor(Math.random() * 1e5)}`;
+    const name = file.name.replace(/\.[^.]+$/, '');
+    project.scenes[id] = { id, name, imageDataUrl: reader.result, hotspots: [] };
+    if (!project.startSceneId) project.startSceneId = id;
+    renderSceneList();
+    loadScene(id);
+    toast('Scene added.');
+  };
+  reader.readAsDataURL(file);
+}
+
+function renderSceneList() {
+  el.sceneList.innerHTML = '';
+  Object.values(project.scenes).forEach(sc => {
+    const li = document.createElement('li');
+    li.className = 'scene' + (sc.id === currentSceneId ? ' active' : '');
+    const left = document.createElement('div'); left.className = 'name'; left.textContent = sc.name;
+    const right = document.createElement('div');
+    const btnLoad = document.createElement('button'); btnLoad.className = 'btn small'; btnLoad.textContent = 'Open';
+    btnLoad.onclick = () => loadScene(sc.id);
+    const btnDel = document.createElement('button'); btnDel.className = 'btn small'; btnDel.textContent = 'Delete';
+    btnDel.onclick = () => {
+      if (!confirm('Delete scene and its hotspots?')) return;
+      delete project.scenes[sc.id];
+      if (project.startSceneId === sc.id) project.startSceneId = null;
+      if (currentSceneId === sc.id) {
+        currentSceneId = null;
+        cleanupSphere();
+      }
+      renderSceneList();
+      const first = Object.keys(project.scenes)[0];
+      if (first) loadScene(first);
+      updateStatus();
+    };
+    right.appendChild(btnLoad); right.appendChild(btnDel);
+    li.appendChild(left); li.appendChild(right);
+    el.sceneList.appendChild(li);
+  });
+  refreshHotspotTargets();
+}
+
+function loadScene(id) {
+  const sc = project.scenes[id];
+  if (!sc) return;
+  currentSceneId = id;
+  loadPanorama(sc.imageDataUrl);
+  renderHotspots(sc.hotspots || []);
+  renderSceneList();
+  renderHotspotList();   // ✅ add this
+  updateStatus();
+}
+
+function openHotspotModal(yaw, pitch) {
+  el.hotspotModal.style.display = 'flex';
+  el.hsLabel.value = '';
+  refreshHotspotTargets();
+
+  el.hsCancel.onclick = () => { el.hotspotModal.style.display = 'none'; placingHotspot = false; };
+  el.hsSave.onclick = () => {
+    const label = el.hsLabel.value || 'Hotspot';
+    const targetSceneId = el.hsTarget.value || null;
+    const sc = project.scenes[currentSceneId];
+    sc.hotspots.push({ id: `hs_${Date.now()}`, yaw, pitch, label, targetSceneId });
+    el.hotspotModal.style.display = 'none';
+    placingHotspot = false;
+    renderHotspots(sc.hotspots);
+    toast('Hotspot added.');
+  };
+}
+
+function refreshHotspotTargets() {
+  const sel = el.hsTarget; sel.innerHTML = '';
+  const optNone = document.createElement('option'); optNone.value = ''; optNone.textContent = '(no link)'; sel.appendChild(optNone);
+  Object.values(project.scenes).forEach(sc => {
+    const o = document.createElement('option'); o.value = sc.id; o.textContent = sc.name + (project.startSceneId === sc.id ? ' (start)' : '');
+    sel.appendChild(o);
+  });
+}
+
+function exportProject() {
+  const data = JSON.stringify(project);
+  const blob = new Blob([data], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href = url; a.download = 'photosphere-project.json'; a.click();
+  URL.revokeObjectURL(url);
+}
+
+function importProject(file) {
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      const data = JSON.parse(reader.result);
+      if (!data || !data.scenes) throw new Error('Invalid project');
+      // replace project fully
+      project.startSceneId = data.startSceneId || null;
+      project.scenes = data.scenes || {};
+      renderSceneList();
+      if (project.startSceneId) loadScene(project.startSceneId);
+      else { const first = Object.keys(project.scenes)[0]; if (first) loadScene(first); }
+      toast('Project imported.');
+    } catch (e) {
+      alert('Invalid project file');
+    }
+  };
+  reader.readAsText(file);
+}
+
+/////////////////
+// Event hooks //
+/////////////////
+el.btnAddScene.onclick = () => el.fileInput.click();
+el.fileInput.onchange = (e) => { const file = e.target.files?.[0]; if (file) addSceneFromFile(file); e.target.value = ''; };
+
+el.btnAddHotspot.onclick = () => { if (!currentSceneId) return alert('Load a scene first.'); placingHotspot = true; toast('Click inside the viewer to place the hotspot…'); };
+el.btnToggleCoords.onclick = () => { showCoords = !showCoords; toast(showCoords ? 'Click to read yaw/pitch' : 'Coords hidden'); };
+el.btnSetStart.onclick = () => { if (!currentSceneId) return; project.startSceneId = currentSceneId; renderSceneList(); toast('Start scene set.'); };
+el.btnClear.onclick = () => {
+  if (!confirm('Reset project? This will remove all scenes and hotspots.')) return;
+  project.startSceneId = null; project.scenes = {}; currentSceneId = null; cleanupSphere(); renderSceneList(); updateStatus();
+};
+
+el.btnExport.onclick = exportProject;
+el.btnImport.onclick = () => {
+  const inp = document.createElement('input'); inp.type = 'file'; inp.accept = 'application/json';
+  inp.onchange = (e) => { const f = e.target.files?.[0]; if (f) importProject(f); };
+  inp.click();
+};
+
+el.btnHelp.onclick = () => el.helpModal.style.display = 'flex';
+el.helpClose.onclick = () => el.helpModal.style.display = 'none';
+document.querySelectorAll('.modal').forEach(m => { m.addEventListener('click', (e) => { if (e.target === m) m.style.display = 'none'; }); });
+
+/* Toggle button logic (header/sidebar) */
+const toggleSidebarBtn = document.getElementById('toggleSidebar');
+const toggleHeaderBtn = document.getElementById('toggleHeader');
+toggleSidebarBtn.onclick = () => {
+  document.body.classList.toggle('sidebar-hidden');
+  const pressed = document.body.classList.contains('sidebar-hidden');
+  toggleSidebarBtn.setAttribute('aria-pressed', String(pressed));
+};
+toggleHeaderBtn.onclick = () => {
+  document.body.classList.toggle('header-hidden');
+  const pressed = document.body.classList.contains('header-hidden');
+  toggleHeaderBtn.setAttribute('aria-pressed', String(pressed));
+};
+
+/* End module script */
+</script>
+
+</body>
+</html>
