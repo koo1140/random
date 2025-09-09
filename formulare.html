@@ -1,0 +1,49 @@
+<!DOCTYPE html><html lang="ro"><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Creator Formulare</title>
+<style>
+body{font-family:sans-serif;margin:0;background:#f3f3f3}
+.page{display:none;padding:20px}
+.active{display:block}
+h1{font-size:20px;margin:10px 0}
+button,input,textarea,select{width:100%;padding:10px;margin:8px 0;border:none;border-radius:12px;box-shadow:0 2px 5px rgba(0,0,0,.2)}
+button{background:#6200ea;color:#fff;cursor:pointer}
+.card{background:#fff;padding:15px;margin:10px 0;border-radius:16px;box-shadow:0 3px 8px rgba(0,0,0,.2)}
+</style>
+<body>
+<div id="home" class="page active"><h1>Formulare</h1>
+<button onclick="show('create')">Creează formular</button>
+<button onclick="show('list')">Vezi formularele</button></div>
+
+<div id="create" class="page">
+<h1>Creează formular</h1>
+<form id="form">
+<label>Data</label><input id="data" readonly>
+<label>Observații</label><textarea id="obs"></textarea>
+<label>Agent</label><input id="agent">
+<label>Nume client</label><input id="client">
+<label>Tip</label><select id="tip"><option>Vizită</option><option>Apel</option></select>
+<label>Încasare</label><input id="incasare">
+<label>Alte produse docilitate</label><input id="alte">
+<button type="submit">Salvează</button>
+</form>
+<button onclick="show('home')">Înapoi</button>
+</div>
+
+<div id="list" class="page">
+<h1>Formulare salvate</h1>
+<div id="items"></div>
+<button onclick="show('home')">Înapoi</button>
+</div>
+
+<script>
+let db;const req=indexedDB.open("formDB",1);
+req.onupgradeneeded=e=>{db=e.target.result;db.createObjectStore("forms",{keyPath:"id",autoIncrement:true})};
+req.onsuccess=e=>{db=e.target.result;refresh()};
+function show(id){document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));document.getElementById(id).classList.add('active');if(id==='list')refresh();if(id==='create')document.getElementById('data').value=new Date().toLocaleString();}
+document.getElementById('form').onsubmit=e=>{e.preventDefault();let tx=db.transaction("forms","readwrite"),s=tx.objectStore("forms");s.add({data:data.value,obs:obs.value,agent:agent.value,client:client.value,tip:tip.value,incasare:incasare.value,alte:alte.value});tx.oncomplete=()=>{alert("Salvat!");show('home');}};
+function refresh(){let tx=db.transaction("forms","readonly"),s=tx.objectStore("forms"),r=s.getAll();r.onsuccess=()=>{items.innerHTML="";r.result.forEach(f=>{let d=document.createElement("div");d.className="card";d.innerHTML=`<b>${f.client}</b> (${f.tip})<br>${f.data}<br>
+<button onclick='edit(${f.id})'>Editează</button> <button onclick='del(${f.id})'>Șterge</button>`;items.appendChild(d)})}}
+function del(id){let tx=db.transaction("forms","readwrite");tx.objectStore("forms").delete(id);tx.oncomplete=refresh}
+function edit(id){let tx=db.transaction("forms","readonly"),s=tx.objectStore("forms").get(id);s.onsuccess=()=>{let f=s.result;show('create');data.value=f.data;obs.value=f.obs;agent.value=f.agent;client.value=f.client;tip.value=f.tip;incasare.value=f.incasare;alte.value=f.alte;del(id)}}
+</script>
+</body></html>
