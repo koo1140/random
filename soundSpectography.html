@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Audio Visualizer with Progress</title>
+<script src="https://cdn.jsdelivr.net/pyodide/v0.26.1/full/pyodide.js"></script>
+<style>
+body { font-family:sans-serif; text-align:center; }
+canvas,img { margin:10px 0; max-width:90%; }
+#debug { background:#f0f0f0; padding:10px; text-align:left; max-height:200px; overflow:auto; }
+#progress-container { width:80%; margin:auto; background:#ccc; height:20px; border-radius:5px; }
+#progress-bar { width:0%; height:100%; background:#4caf50; border-radius:5px; }
+</style>
+</head>
+<body>
+<h2>Upload Audio + Visualize</h2>
+<input type="file" id="fileInput" accept="audio/*"><br><br>
+<button id="runButton" disabled>Loading Pyodide...</button>
+
+<div id="progress-container">
+  <div id="progress-bar"></div>
+</div>
+<span id="progress-text">0%</span>
+
+<div id="debug"></div>
+<div id="output"></div>
+
+<script>
+let pyodideReady=false;
+let audioData=null;
+let audioFs=null;
+
+function logDebug(msg){
+    const debugDiv=document.getElementById("debug");
+    debugDiv.innerHTML+=msg+"<br>";
+    debugDiv.scrollTop=debugDiv.scrollHeight;
+}
+function setProgress(percent,msg=""){
+    document.getElementById("progress-bar").style.width=percent+"%";
+    document.getElementById("progress-text").textContent=percent+"% "+msg;
+}
+
+// Load Pyodide + packages
+async function loadPyodideAndPackages(){
+    setProgress(5,"Loading Pyodide...");
+    window.pyodide=await loadPyodide();
+    setProgress(20,"Loading packages...");
+    await pyodide.loadPackage(["numpy","matplotlib","scipy"]);
+    pyodideReady=true;
+    const runBtn=document.getElementById("runButton");
+    runBtn.disabled=false;
+    runBtn.textContent="Run";
+    setProgress(30,"Pyodide ready");
+    logDebug("Pyodide ready!");
+}
+loadPyodideAndPackages();
+
+// Decode audio
+document.getElementById("fileInput").addEventListener("change", async (evt)=>{
+    const file=evt.target.files[0];
+    if(!file) return;
+    logDebug(`File loaded: ${file.name}, size: ${file.size} bytes`);
+    try{
+        setProgress(35,"Decoding audio...");
+        const audioCtx=new AudioContext();
+        const arrayBuffer=await file.arrayBuffer();
+        const audioBuffer=await audioCtx.decodeAudioData(arrayBuffer);
+        audioData=audioBuffer.getChannelData(0); // mono
+        audioFs=audioBuffer.sampleRate;
+        setProgress(50,"Audio decoded");
+        logDebug(`Decoded audio: ${audioData.length} samples, sample rate: ${audioFs}`);
+    }catch(e){
+        logDebug(`Error decoding audio: ${e}`);
+        audioData=null;
+    }
+});
+
+// Run Python
+document.getElementById("runButton").addEventListener("click", async ()=>{
+    if(!pyodideReady){ alert("Pyodide not ready"); return; }
+    if(!audioData){ alert("No audio decoded"); return; }
+
+    document.getElementById("output").innerHTML="";
+    document.getElementById("debug").innerHTML="";
+    setProgress(55,"Starting Python processing...");
+
+    pyodide.globals.set("data",audioData);
+    pyodide.globals.set("fs",audioFs);
+
+    // Python code with debug/progress
+    await pyodide.runPythonAsync(`
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy.signal import spectrogram
+import io, base64
+
+debug_msgs=[]
+def debug(msg):
+    debug_msgs.append(str(msg))
+
+data_np=np.array(data)
+fs=int(fs)
+debug(f"Sample rate: {fs}, dtype: {data_np.dtype}, shape: {data_np.shape}")
+debug(f"First 10 samples: {data_np[:10]}")
+
+# Waveform
+fig=plt.figure(figsize=(8,3))
+plt.plot(data_np)
+plt.title("Waveform")
+plt.xlabel("Samples")
+plt.ylabel("Amplitude")
+buf=io.BytesIO()
+fig.savefig(buf,format="png")
+waveform_b64=base64.b64encode(buf.getvalue()).decode()
+`);
+
+// Update progress after waveform
+setProgress(70,"Waveform done, generating spectrogram...");
+
+// Spectrogram
+await pyodide.runPythonAsync(`
+nperseg=min(256,len(data_np))
+f,t,Sxx=spectrogram(data_np,fs=fs,nperseg=nperseg)
+debug(f"Spectrogram shape: {Sxx.shape}")
+fig=plt.figure(figsize=(8,4))
+plt.pcolormesh(t,f,10*np.log10(Sxx+1e-10),shading="gouraud")
+plt.ylabel("Frequency [Hz]")
+plt.xlabel("Time [s]")
+plt.ylim(0,10000)
+plt.title("Spectrogram (dB)")
+plt.colorbar(label="dB")
+buf=io.BytesIO()
+fig.savefig(buf,format="png")
+spec_b64=base64.b64encode(buf.getvalue()).decode()
+`);
+
+setProgress(100,"Done!");
+
+// Show debug
+const debugMsgs=pyodide.globals.get("debug_msgs").toJs();
+document.getElementById("debug").innerHTML=debugMsgs.join("<br>");
+
+// Show images
+const waveform=pyodide.globals.get("waveform_b64");
+const spectrogram=pyodide.globals.get("spec_b64");
+let outHTML="";
+if(waveform) outHTML+=`<img src="data:image/png;base64,${waveform}"><br>`;
+if(spectrogram) outHTML+=`<img src="data:image/png;base64,${spectrogram}"><br>`;
+document.getElementById("output").innerHTML=outHTML;
+});
+</script>
+</body>
+</html>
