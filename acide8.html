@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Live Spectrogram JS Heatmap</title>
+<style>
+body{text-align:center;font-family:sans-serif;}
+canvas{border:1px solid #ccc;margin-top:10px;}
+#progress{margin-top:10px;font-family:monospace;white-space:pre-wrap;text-align:left;max-height:200px;overflow:auto;border:1px solid #ccc;padding:5px;}
+</style>
+</head>
+<body>
+<h2>Live Spectrogram (6s) - Heatmap</h2>
+<button id="startBtn">Start Mic</button>
+<div id="progress">Waiting...</div>
+<canvas id="specCanvas" width="800" height="400"></canvas>
+
+<script>
+// ---- Setup ----
+const canvas=document.getElementById("specCanvas");
+const ctx=canvas.getContext("2d");
+const progress=document.getElementById("progress");
+const startBtn=document.getElementById("startBtn");
+
+let audioCtx, analyser, dataArray, bufferLength;
+const fs = 44100;
+
+function log(msg){
+    progress.textContent += msg+"\n";
+    progress.scrollTop = progress.scrollHeight;
+}
+
+window.onerror = function(message, source, lineno, colno, error) {
+  log(`ERROR: ${message} at ${source}:${lineno}:${colno}`);
+};
+
+// Viridis colormap (simplified)
+function viridis(value){ // value 0..1
+    const v = Math.max(0, Math.min(1,value));
+    const r=[68,71,64,59,54,50,47,45,42,40,39,38,38,38,39,41,44,49,54,60,66,73,81,90,100,110,121,133,145,158,171,184,196,208,219,229,239,248,253,255];
+    const g=[1,2,3,4,6,8,11,14,18,22,27,33,40,47,55,63,71,79,87,94,101,107,112,117,121,124,127,130,132,135,137,140,143,145,148,150,153,155,158,161,163,166,169,172,175,177,180,183,186,189,192,195,198,201];
+    const b=[84,85,87,89,92,95,99,103,107,112,116,121,126,131,136,141,147,152,158,164,170,177,183,190,197,204,211,218,224,231,238,244,250,254,255,255,255,255,255,255,255];
+    let i = Math.floor(v*(r.length-1));
+    return `rgb(${r[i]},${g[i]},${b[i]})`;
+}
+
+// ---- Start Mic ----
+startBtn.onclick=async ()=>{
+    try{
+        audioCtx = new (window.AudioContext||window.webkitAudioContext)();
+        const stream = await navigator.mediaDevices.getUserMedia({audio:true});
+        const src = audioCtx.createMediaStreamSource(stream);
+
+        analyser = audioCtx.createAnalyser();
+        analyser.fftSize = 2048; // higher resolution
+        bufferLength = analyser.frequencyBinCount;
+        dataArray = new Float32Array(bufferLength);
+
+        src.connect(analyser);
+        log("Mic started!");
+        drawSpectrogram();
+    }catch(e){
+        log("Mic error: "+e);
+    }
+};
+
+// ---- Draw Spectrogram ----
+function drawSpectrogram(){
+    try{
+        // shift image left 1 px
+        const img = ctx.getImageData(1,0,canvas.width-1,canvas.height);
+        ctx.putImageData(img,0,0);
+        ctx.fillStyle="black";
+        ctx.fillRect(canvas.width-1,0,1,canvas.height);
+
+        analyser.getFloatFrequencyData(dataArray); // -100..0 dB
+
+        for(let i=0;i<canvas.height;i++){
+            const freq = i/canvas.height; // 0..1
+            const idx = Math.floor(freq*bufferLength);
+            let v = dataArray[idx]; // dB
+            v = (v+100)/100; // normalize 0..1
+            v = Math.max(0,Math.min(1,v));
+            ctx.fillStyle = viridis(v);
+            ctx.fillRect(canvas.width-1,canvas.height-1-i,1,1);
+        }
+
+        // Optional: time axis
+        ctx.fillStyle="white";
+        ctx.font="10px sans-serif";
+        ctx.fillText("Time →", canvas.width-50, canvas.height-5);
+        ctx.fillText("Freq 0–8kHz", 5,10);
+    }catch(e){
+        log("Draw error: "+e);
+    }
+    requestAnimationFrame(drawSpectrogram);
+}
+</script>
+</body>
+</html>
