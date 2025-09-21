@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Live Spectrogram JS - Debug</title>
+<style>
+body{text-align:center;font-family:sans-serif;}
+canvas{border:1px solid #ccc;margin-top:10px;}
+#progress{margin-top:10px;font-family:monospace;white-space:pre-wrap;text-align:left;max-height:200px;overflow:auto;border:1px solid #ccc;padding:5px;}
+</style>
+</head>
+<body>
+<h2>Live Spectrogram (6s) - JS Only + Errors</h2>
+<button id="startBtn">Start Mic</button>
+<div id="progress">Waiting...</div>
+<canvas id="specCanvas" width="800" height="400"></canvas>
+
+<script>
+const canvas=document.getElementById("specCanvas");
+const ctx=canvas.getContext("2d");
+const progress=document.getElementById("progress");
+const startBtn=document.getElementById("startBtn");
+
+let audioCtx,processor,buffer=[];
+const fs=44100; // assume common sample rate
+const nperseg=128; // same as Python example
+const windowSeconds=6;
+
+function log(msg){progress.textContent+=msg+"\n"; progress.scrollTop=progress.scrollHeight;}
+
+// global error handler
+window.onerror = function(message, source, lineno, colno, error) {
+  log(`ERROR: ${message} at ${source}:${lineno}:${colno}`);
+};
+
+function hanning(N){
+  let w=new Float32Array(N);
+  for(let i=0;i<N;i++) w[i]=0.5-0.5*Math.cos(2*Math.PI*i/(N-1));
+  return w;
+}
+
+// Simple FFT for demo (slow for mobile!)
+function simpleFFT(x){
+  const N=x.length;
+  const X=new Array(N/2).fill(0);
+  for(let k=0;k<N/2;k++){
+    let re=0,im=0;
+    for(let n=0;n<N;n++){
+      const phi=2*Math.PI*k*n/N;
+      re+=x[n]*Math.cos(phi);
+      im-=x[n]*Math.sin(phi);
+    }
+    X[k]=Math.sqrt(re*re+im*im);
+  }
+  return X;
+}
+
+function generateSpectrogram(){
+  try{
+    if(buffer.length<nperseg) return;
+    const start=performance.now();
+    const windowSamples=fs*windowSeconds;
+    let buf=buffer.slice(-windowSamples);
+    const hop=64; // 50% overlap
+    const hann=hanning(nperseg);
+    const rows=Math.floor((buf.length-nperseg)/hop)+1;
+    const cols=nperseg/2;
+    const Sxx=[];
+    for(let i=0;i<rows;i++){
+      const segment=buf.slice(i*hop,i*hop+nperseg);
+      const wined=segment.map((v,j)=>v*hann[j]);
+      const mag=simpleFFT(wined);
+      Sxx.push(mag);
+    }
+    // find min/max for scaling
+    let minVal=Infinity,maxVal=-Infinity;
+    for(let row of Sxx) for(let v of row){ let db=10*Math.log10(v*v+1e-10); if(db<minVal) minVal=db; if(db>maxVal) maxVal=db; }
+
+    // draw
+    const imgData=ctx.createImageData(canvas.width,canvas.height);
+    for(let i=0;i<canvas.width;i++){
+      const t=Math.floor(i/canvas.width*Sxx.length);
+      for(let j=0;j<canvas.height;j++){
+        const f=Math.floor(j/canvas.height*cols);
+        let val=0;
+        if(Sxx[t] && Sxx[t][f]) val=10*Math.log10(Sxx[t][f]*Sxx[t][f]+1e-10);
+        let c=Math.floor((val-minVal)/(maxVal-minVal)*255);
+        c=Math.max(0,Math.min(255,c));
+        const idx=(canvas.height-j-1)*canvas.width*4+i*4;
+        imgData.data[idx]=c; imgData.data[idx+1]=c; imgData.data[idx+2]=c; imgData.data[idx+3]=255;
+      }
+    }
+    ctx.putImageData(imgData,0,0);
+    const dur=(performance.now()-start).toFixed(1);
+    log(`Processed in ${dur} ms, samples=${buf.length}`);
+  }catch(e){
+    log("Spectrogram error: "+e);
+  }
+  requestAnimationFrame(generateSpectrogram);
+}
+
+startBtn.onclick=async ()=>{
+  try{
+    audioCtx=new (window.AudioContext||window.webkitAudioContext)();
+    const stream=await navigator.mediaDevices.getUserMedia({audio:true});
+    const src=audioCtx.createMediaStreamSource(stream);
+    processor=audioCtx.createScriptProcessor(4096,1,1);
+    src.connect(processor); processor.connect(audioCtx.destination);
+    processor.onaudioprocess=e=>{
+      buffer.push(...e.inputBuffer.getChannelData(0));
+      if(buffer.length>fs*windowSeconds) buffer=buffer.slice(-fs*windowSeconds);
+    };
+    generateSpectrogram();
+    log("Mic started!");
+  }catch(e){
+    log("Mic error: "+e);
+  }
+};
+</script>
+</body>
+</html>
