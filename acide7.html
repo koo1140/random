@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Live Spectrogram JS Fast</title>
+<style>
+body{text-align:center;font-family:sans-serif;}
+canvas{border:1px solid #ccc;margin-top:10px;}
+#progress{margin-top:10px;font-family:monospace;white-space:pre-wrap;text-align:left;max-height:200px;overflow:auto;border:1px solid #ccc;padding:5px;}
+</style>
+</head>
+<body>
+<h2>Live Spectrogram (6s) - Fast JS</h2>
+<button id="startBtn">Start Mic</button>
+<div id="progress">Waiting...</div>
+<canvas id="specCanvas" width="800" height="400"></canvas>
+
+<script>
+const canvas=document.getElementById("specCanvas");
+const ctx=canvas.getContext("2d");
+const progress=document.getElementById("progress");
+const startBtn=document.getElementById("startBtn");
+
+let audioCtx, analyser, dataArray, bufferLength;
+
+function log(msg){
+    progress.textContent += msg+"\n";
+    progress.scrollTop = progress.scrollHeight;
+}
+
+window.onerror = function(message, source, lineno, colno, error) {
+  log(`ERROR: ${message} at ${source}:${lineno}:${colno}`);
+};
+
+startBtn.onclick=async ()=>{
+    try{
+        audioCtx = new (window.AudioContext||window.webkitAudioContext)();
+        const stream = await navigator.mediaDevices.getUserMedia({audio:true});
+        const src = audioCtx.createMediaStreamSource(stream);
+
+        analyser = audioCtx.createAnalyser();
+        analyser.fftSize = 1024; // small for fast mobile
+        bufferLength = analyser.frequencyBinCount;
+        dataArray = new Float32Array(bufferLength);
+
+        src.connect(analyser);
+        log("Mic started!");
+
+        drawSpectrogram();
+    }catch(e){
+        log("Mic error: "+e);
+    }
+};
+
+const spectrogramHeight = canvas.height;
+const spectrogramWidth = canvas.width;
+const rollingSeconds = 6;
+let rollingPixels = rollingSeconds * 60; // approx 60 fps, scaled for canvas width
+
+function drawSpectrogram(){
+    try{
+        // shift image left 1 px
+        const img = ctx.getImageData(1,0,canvas.width-1,canvas.height);
+        ctx.putImageData(img,0,0);
+        ctx.fillStyle="black";
+        ctx.fillRect(canvas.width-1,0,1,canvas.height);
+
+        analyser.getFloatFrequencyData(dataArray); // -100..0 dB
+
+        for(let i=0;i<canvas.height;i++){
+            const idx = Math.floor(i*bufferLength/canvas.height);
+            let v = dataArray[idx]; // dB
+            let color = Math.floor(255*(v+100)/100); 
+            color = Math.max(0, Math.min(255,color));
+            ctx.fillStyle = `rgb(${color},${color},${color})`;
+            ctx.fillRect(canvas.width-1,canvas.height-1-i,1,1);
+        }
+    }catch(e){
+        log("Draw error: "+e);
+    }
+    requestAnimationFrame(drawSpectrogram);
+}
+</script>
+</body>
+</html>
