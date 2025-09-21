@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Live Spectrogram</title>
+<script src="https://cdn.jsdelivr.net/pyodide/v0.26.1/full/pyodide.js"></script>
+<style>
+body{text-align:center;font-family:sans-serif}
+#progress{margin:10px;font-size:14px}
+img{max-width:90%;margin-top:10px}
+</style>
+</head>
+<body>
+<h2>Live Spectrogram (last 6s)</h2>
+<button id="startBtn" disabled>Loading Pyodide...</button>
+<div id="progress">Waiting...</div>
+<div id="output"></div>
+
+<script>
+let pyodideReady=false,fs=44100;
+let audioCtx,processor,buffer=[];
+async function initPyodide(){
+  pyodide=await loadPyodide();
+  await pyodide.loadPackage(["numpy","matplotlib","scipy"]);
+  pyodideReady=true;
+  startBtn.disabled=false;startBtn.textContent="Start Mic";
+  document.getElementById("progress").textContent="Pyodide ready!";
+}
+initPyodide();
+
+async function startMic(){
+  audioCtx=new AudioContext();
+  fs=audioCtx.sampleRate;
+  const stream=await navigator.mediaDevices.getUserMedia({audio:true});
+  const src=audioCtx.createMediaStreamSource(stream);
+  processor=audioCtx.createScriptProcessor(4096,1,1);
+  src.connect(processor);processor.connect(audioCtx.destination);
+  processor.onaudioprocess=e=>{
+    buffer.push(...e.inputBuffer.getChannelData(0));
+    if(buffer.length>fs*6) buffer=buffer.slice(buffer.length-fs*6);
+  };
+  loop();
+}
+
+async function loop(){
+  if(!pyodideReady){setTimeout(loop,500);return;}
+  if(buffer.length<fs*0.5){setTimeout(loop,200);return;} // wait until enough
+  let start=performance.now();
+  let arr=new Float32Array(buffer);
+  pyodide.globals.set("data",arr);
+  pyodide.globals.set("fs",fs);
+  await pyodide.runPythonAsync(`
+import numpy as np, io, base64
+import matplotlib.pyplot as plt
+from scipy.signal import spectrogram
+d=np.array(data); sr=int(fs)
+nperseg=min(256,len(d))
+f,t,Sxx=spectrogram(d,fs=sr,nperseg=nperseg)
+fig=plt.figure(figsize=(8,4))
+plt.pcolormesh(t,f,10*np.log10(Sxx+1e-10),shading="gouraud")
+plt.ylim(0,10000);plt.xlabel("Time [s]");plt.ylabel("Hz");plt.title("Spectrogram")
+plt.colorbar(label="dB")
+buf=io.BytesIO();fig.savefig(buf,format="png");plt.close(fig)
+spec_b64=base64.b64encode(buf.getvalue()).decode()
+`);
+  let dur=(performance.now()-start).toFixed(0);
+  document.getElementById("progress").textContent="Processing time: "+dur+" ms";
+  let img=pyodide.globals.get("spec_b64");
+  document.getElementById("output").innerHTML=`<img src="data:image/png;base64,${img}">`;
+  loop();
+}
+
+startBtn.onclick=startMic;
+</script>
+</body>
+</html>
