@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Live Spectrogram 6s</title>
+<script src="https://cdn.jsdelivr.net/pyodide/v0.26.1/full/pyodide.js"></script>
+<style>
+body{text-align:center;font-family:sans-serif}
+#progress{margin:10px;font-size:14px;white-space:pre-wrap;text-align:left;max-height:200px;overflow:auto;border:1px solid #ccc;padding:5px}
+img{max-width:90%;margin-top:10px}
+</style>
+</head>
+<body>
+<h2>Live Spectrogram (last 6s)</h2>
+<button id="startBtn" disabled>Loading Pyodide...</button>
+<div id="progress">Waiting...</div>
+<div id="output"></div>
+
+<script>
+let pyodideReady=false,fs=44100;
+let audioCtx,processor,buffer=[];
+
+function log(msg){
+  const div=document.getElementById("progress");
+  div.textContent+="\n"+msg;
+  div.scrollTop=div.scrollHeight;
+}
+
+async function initPyodide(){
+  log("Loading Pyodide...");
+  pyodide=await loadPyodide();
+  log("Loading packages...");
+  await pyodide.loadPackage(["numpy","matplotlib","scipy"]);
+  pyodideReady=true;
+  startBtn.disabled=false; startBtn.textContent="Start Mic";
+  log("Pyodide ready!");
+}
+initPyodide();
+
+async function startMic(){
+  audioCtx=new AudioContext();
+  fs=audioCtx.sampleRate;
+  const stream=await navigator.mediaDevices.getUserMedia({audio:true});
+  const src=audioCtx.createMediaStreamSource(stream);
+  processor=audioCtx.createScriptProcessor(4096,1,1);
+  src.connect(processor); processor.connect(audioCtx.destination);
+  processor.onaudioprocess=e=>{
+    buffer.push(...e.inputBuffer.getChannelData(0));
+    if(buffer.length>fs*6) buffer=buffer.slice(buffer.length-fs*6);
+  };
+  loop();
+}
+
+async function loop(){
+  if(!pyodideReady){setTimeout(loop,500);return;}
+  if(buffer.length<fs*0.5){setTimeout(loop,200);return;} // wait enough samples
+
+  let start=performance.now();
+  let arr=new Float32Array(buffer);
+  pyodide.globals.set("data",arr);
+  pyodide.globals.set("fs",fs);
+
+  try{
+    await pyodide.runPythonAsync(`
+import matplotlib
+matplotlib.use("Agg")
+import numpy as np, io, base64, matplotlib.pyplot as plt
+from scipy.signal import spectrogram
+
+debug_msgs=[]
+def debug(msg): debug_msgs.append(str(msg))
+
+d=np.array(data); sr=int(fs)
+debug(f"Input: {len(d)} samples, sr={sr}")
+
+if len(d)<2000:
+    spec_b64=""; debug("Too few samples")
+else:
+    nperseg=min(256,len(d))
+    f,t,Sxx=spectrogram(d,fs=sr,nperseg=nperseg)
+    debug(f"Spectrogram shape {Sxx.shape}")
+    fig=plt.figure(figsize=(6,3), dpi=80)
+    plt.pcolormesh(t,f,10*np.log10(Sxx+1e-10),shading="gouraud")
+    plt.ylim(0,8000)
+    plt.xlabel("Time [s]"); plt.ylabel("Hz")
+    plt.title("Spectrogram")
+    plt.colorbar(label="dB")
+    buf=io.BytesIO()
+    fig.savefig(buf, format="png")  # Fără plt.close()
+    spec_b64=base64.b64encode(buf.getvalue()).decode()
+`);
+  }catch(e){
+    log("Python error: "+e);
+  }
+
+  let dur=(performance.now()-start).toFixed(0);
+  log("Processed in "+dur+" ms");
+
+  const dbg=pyodide.globals.get("debug_msgs");
+  if(dbg){ log(dbg.toJs().join("\n")); }
+
+  let img=pyodide.globals.get("spec_b64");
+  if(img && img.length>0){
+    document.getElementById("output").innerHTML=`<img src="data:image/png;base64,${img}">`;
+  }
+
+  loop();
+}
+
+startBtn.onclick=startMic;
+</script>
+</body>
+</html>
