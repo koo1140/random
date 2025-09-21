@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Live Spectrogram Fixed dB</title>
+<style>
+body{text-align:center;font-family:sans-serif;}
+canvas{border:1px solid #ccc;margin-top:10px;}
+#progress{margin-top:10px;font-family:monospace;white-space:pre-wrap;text-align:left;max-height:200px;overflow:auto;border:1px solid #ccc;padding:5px;}
+</style>
+</head>
+<body>
+<h2>Live Spectrogram (6s) - Fixed dB Scale</h2>
+<button id="startBtn">Start Mic</button>
+<div id="progress">Waiting...</div>
+<canvas id="specCanvas" width="800" height="400"></canvas>
+
+<script>
+const canvas=document.getElementById("specCanvas");
+const ctx=canvas.getContext("2d");
+const progress=document.getElementById("progress");
+const startBtn=document.getElementById("startBtn");
+
+let audioCtx, analyser, dataArray, bufferLength;
+const fs=44100;
+const fftSize=8192;
+const rollingSeconds=6;
+const framesPerSec=30;
+let rollingFrames = [];
+const minDB=-80;
+const maxDB=0;
+const maxFreq=8000; // 0-8kHz
+
+function log(msg){
+    progress.textContent+=msg+"\n";
+    progress.scrollTop=progress.scrollHeight;
+}
+window.onerror=function(message, source, lineno, colno, error){
+    log(`ERROR: ${message} at ${source}:${lineno}:${colno}`);
+};
+
+// Viridis colormap
+function viridis(value){
+    value = Math.max(0, Math.min(1, value));
+    const r=[68,71,68,68,69,71,73,76,79,82,85,88,91,95,98,102,106,109,113,117,121,125,129,133,137,141,145,149,153,157,162,166,171,175,180,184,189,194,198,203,208,212,217,221,226,231,236,240,245,250,253,255];
+    const g=[1,2,3,4,6,8,11,14,18,22,27,33,40,47,55,63,71,79,87,94,101,107,112,117,121,124,127,130,132,135,137,140,143,145,148,150,153,155,158,161,163,166,169,172,175,177,180,183,186,189,192,195,198,201];
+    const b=[84,85,87,89,92,95,99,103,107,112,116,121,126,131,136,141,147,152,158,164,170,177,183,190,197,204,211,218,224,231,238,244,250,254,255];
+    const i=Math.min(r.length-1, Math.floor(value*255));
+    return `rgb(${r[i]},${g[i]},${b[i]})`;
+}
+
+// Start Mic
+startBtn.onclick=async ()=>{
+    try{
+        audioCtx = new (window.AudioContext||window.webkitAudioContext)();
+        const stream = await navigator.mediaDevices.getUserMedia({audio:true});
+        const src = audioCtx.createMediaStreamSource(stream);
+
+        analyser = audioCtx.createAnalyser();
+        analyser.fftSize = fftSize;
+        bufferLength = analyser.frequencyBinCount;
+        dataArray = new Float32Array(bufferLength);
+
+        src.connect(analyser);
+        log("Mic started!");
+        drawSpectrogram();
+    }catch(e){ log("Mic error: "+e); }
+};
+
+// Draw Spectrogram
+function drawSpectrogram(){
+    try{
+        analyser.getFloatFrequencyData(dataArray); // dB values
+
+        // map dB to 0..1 fixed
+        const normData = dataArray.map(v=>{
+            let x = (v - minDB)/(maxDB - minDB);
+            return Math.max(0, Math.min(1, x));
+        });
+
+        // rolling buffer
+        rollingFrames.push(normData);
+        const maxFrames = rollingSeconds*framesPerSec;
+        if(rollingFrames.length>maxFrames) rollingFrames.shift();
+
+        // draw full canvas
+        const w = canvas.width;
+        const h = canvas.height;
+        ctx.clearRect(0,0,w,h);
+
+        const freqLimitIndex = Math.floor(maxFreq/(fs/2)*bufferLength);
+
+        for(let x=0;x<rollingFrames.length;x++){
+            const frame = rollingFrames[x];
+            for(let y=0;y<h;y++){
+                const freqIdx = freqLimitIndex - 1 - Math.floor(y/h*freqLimitIndex);
+                const v = frame[freqIdx];
+                ctx.fillStyle = viridis(v);
+                ctx.fillRect(Math.floor(x/w*w), h-1-y, 1,1);
+            }
+        }
+
+        // axes
+        ctx.fillStyle="white";
+        ctx.font="12px sans-serif";
+        ctx.fillText("Time →", w-50, h-5);
+        ctx.fillText("Freq 0–8kHz", 5,12);
+
+    }catch(e){ log("Draw error: "+e); }
+
+    requestAnimationFrame(drawSpectrogram);
+}
+</script>
+</body>
+</html>
