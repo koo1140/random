@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Mono Echolocation</title>
+<style>
+body{margin:0;background:#000;color:#0f0;font-family:monospace;display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;overflow:hidden}
+canvas{background:#010;border:1px solid #0f0;margin-top:10px}
+button{margin-top:10px;padding:6px 12px;border:none;background:#030;border:1px solid #0f0;color:#0f0;cursor:pointer}
+</style>
+</head>
+<body>
+<h3>📡 Mono Echolocation (Microphone Only)</h3>
+<button id="pingBtn">Send Echo Ping</button>
+<canvas id="radar" width="400" height="400"></canvas>
+<script>
+const canvas=document.getElementById("radar");
+const ctx=canvas.getContext("2d");
+let audioCtx, analyser, dataArray, bufferLength;
+
+// Initialize microphone
+async function initAudio(){
+    try {
+        audioCtx=new (window.AudioContext||window.webkitAudioContext)();
+        const stream = await navigator.mediaDevices.getUserMedia({audio:{channelCount:1}});
+        const source = audioCtx.createMediaStreamSource(stream);
+        analyser = audioCtx.createAnalyser();
+        analyser.fftSize = 2048;
+        bufferLength = analyser.fftSize;
+        dataArray = new Float32Array(bufferLength);
+        source.connect(analyser);
+        console.log("Mic initialized!");
+    } catch(e){
+        alert("Microphone access denied or unavailable. Open via HTTPS or localhost.");
+        console.error(e);
+    }
+}
+
+// Detect peaks in mic input and return their indices
+function detectEcho(){
+    if(!analyser) return [];
+    analyser.getFloatTimeDomainData(dataArray);
+    const threshold = 0.05; // adjust for sensitivity
+    const echoes = [];
+    for(let i=0; i<dataArray.length; i++){
+        if(Math.abs(dataArray[i]) > threshold){
+            echoes.push(i);
+        }
+    }
+    return echoes;
+}
+
+// Draw radar map
+function drawRadar(echos){
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+    const cx = canvas.width/2, cy = canvas.height/2;
+    const maxDistance = bufferLength;
+
+    // Draw concentric circles
+    ctx.strokeStyle="#0f0";
+    for(let r=50; r<cx; r+=50){
+        ctx.beginPath();
+        ctx.arc(cx,cy,r,0,2*Math.PI);
+        ctx.stroke();
+    }
+
+    // Plot echoes
+    ctx.fillStyle="#0f0";
+    echos.forEach(idx=>{
+        const r = (idx/maxDistance) * cx;
+        const angle = Math.random()*2*Math.PI; // random direction for now
+        const x = cx + r*Math.cos(angle);
+        const y = cy + r*Math.sin(angle);
+        ctx.beginPath();
+        ctx.arc(x,y,4,0,2*Math.PI);
+        ctx.fill();
+    });
+}
+
+// Handle ping button
+document.getElementById("pingBtn").onclick = async ()=>{
+    if(!audioCtx) await initAudio();
+    // capture ~100ms of mic input after click
+    const samples = 5; // number of frames to sample for echo
+    let allEchoes = [];
+    let count = 0;
+    const interval = setInterval(()=>{
+        const echoes = detectEcho();
+        allEchoes = allEchoes.concat(echoes);
+        count++;
+        if(count>=samples){
+            clearInterval(interval);
+            drawRadar(allEchoes);
+        }
+    }, 20);
+};
+</script>
+</body>
+</html>
