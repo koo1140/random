@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Real Echolocation Test</title>
+<style>
+body{margin:0;background:#000;color:#0f0;font-family:monospace;display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;overflow:hidden}
+canvas{background:#010;margin-top:10px;border:1px solid #0f0}
+button, input{margin-top:5px;padding:4px;border:none;background:#030;border:1px solid #0f0;color:#0f0;cursor:pointer}
+label{margin-top:5px}
+</style>
+</head>
+<body>
+<h3>📡 Real Echolocation Test</h3>
+<button id="pingBtn">Send Ping</button>
+<div>
+  <label>Frequency (Hz): <span id="freqVal">3000</span></label>
+  <input type="range" id="freq" min="1000" max="5000" value="3000">
+</div>
+<div>
+  <label>Volume: <span id="volVal">1</span></label>
+  <input type="range" id="vol" min="0.1" max="2" value="1" step="0.1">
+</div>
+<div>
+  <label>Detection Threshold: <span id="threshVal">0.05</span></label>
+  <input type="range" id="thresh" min="0.01" max="0.2" value="0.05" step="0.01">
+</div>
+<canvas id="radar" width="400" height="400"></canvas>
+<script>
+const canvas=document.getElementById("radar");
+const ctx=canvas.getContext("2d");
+let audioCtx, micStream, analyser, dataArray, bufferLength;
+
+// Settings
+let pingFreq = 3000;
+let pingVol = 1;
+let threshold = 0.05;
+
+// Sliders
+const freqSlider = document.getElementById("freq");
+const volSlider = document.getElementById("vol");
+const threshSlider = document.getElementById("thresh");
+freqSlider.oninput = ()=>{ pingFreq = +freqSlider.value; document.getElementById("freqVal").textContent = pingFreq;}
+volSlider.oninput = ()=>{ pingVol = +volSlider.value; document.getElementById("volVal").textContent = pingVol;}
+threshSlider.oninput = ()=>{ threshold = +threshSlider.value; document.getElementById("threshVal").textContent = threshold;}
+
+// Initialize mic
+async function initAudio(){
+    try{
+        audioCtx = new (window.AudioContext||window.webkitAudioContext)();
+        micStream = await navigator.mediaDevices.getUserMedia({audio:{channelCount:1}});
+        const source = audioCtx.createMediaStreamSource(micStream);
+        analyser = audioCtx.createAnalyser();
+        analyser.fftSize = 2048;
+        bufferLength = analyser.fftSize;
+        dataArray = new Float32Array(bufferLength);
+        source.connect(analyser);
+        console.log("Mic initialized!");
+    } catch(e){
+        alert("Microphone access denied or unavailable. Open via HTTPS or localhost.");
+        console.error(e);
+    }
+}
+
+// Play short ping
+function playPing(){
+    if(!audioCtx) return;
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type = "sine";
+    osc.frequency.value = pingFreq;
+    gain.gain.setValueAtTime(0, audioCtx.currentTime);
+    gain.gain.linearRampToValueAtTime(pingVol, audioCtx.currentTime+0.002);
+    gain.gain.linearRampToValueAtTime(0, audioCtx.currentTime+0.02);
+    osc.connect(gain).connect(audioCtx.destination);
+    osc.start();
+    osc.stop(audioCtx.currentTime+0.03);
+}
+
+// Detect echo peaks
+function detectEcho(){
+    if(!analyser) return [];
+    analyser.getFloatTimeDomainData(dataArray);
+    const echoes=[];
+    for(let i=0;i<dataArray.length;i++){
+        if(Math.abs(dataArray[i])>threshold) echoes.push(i);
+    }
+    return echoes;
+}
+
+// Draw echo points
+function drawEchoes(echos){
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+    const cx = canvas.width/2;
+    const cy = canvas.height/2;
+    const maxDist = bufferLength;
+    ctx.fillStyle="#0f0";
+    echos.forEach(idx=>{
+        const r = (idx/maxDist)*(canvas.width/2);
+        const angle = Math.random()*2*Math.PI;
+        const x = cx + r*Math.cos(angle);
+        const y = cy + r*Math.sin(angle);
+        ctx.beginPath();
+        ctx.arc(x,y,3,0,2*Math.PI);
+        ctx.fill();
+    });
+}
+
+// Ping button
+document.getElementById("pingBtn").onclick=async()=>{
+    if(!audioCtx) await initAudio();
+    playPing();
+    // Sample mic multiple times to catch echo
+    let allEchoes=[];
+    let count=0;
+    const interval = setInterval(()=>{
+        const echoes = detectEcho();
+        allEchoes = allEchoes.concat(echoes);
+        count++;
+        if(count>=5){
+            clearInterval(interval);
+            drawEchoes(allEchoes);
+        }
+    },20);
+};
+</script>
+</body>
+</html>
