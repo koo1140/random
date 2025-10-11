@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Simple Echolocation</title>
+<style>
+body{margin:0;background:#000;color:#0f0;font-family:monospace;display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;overflow:hidden}
+canvas{background:#010;margin-top:10px;border:1px solid #0f0}
+button{margin-top:10px;padding:6px 12px;border:none;background:#030;border:1px solid #0f0;color:#0f0;cursor:pointer}
+</style>
+</head>
+<body>
+<h3>📡 Ping & Listen Echolocation</h3>
+<button id="pingBtn">Send Ping</button>
+<canvas id="radar" width="400" height="400"></canvas>
+<script>
+const canvas=document.getElementById("radar");
+const ctx=canvas.getContext("2d");
+
+let audioCtx, micStream, analyser, dataArray, bufferLength;
+
+// Initialize audio and microphone
+async function initAudio(){
+    try {
+        audioCtx = new (window.AudioContext||window.webkitAudioContext)();
+        micStream = await navigator.mediaDevices.getUserMedia({audio:{channelCount:1}});
+        const source = audioCtx.createMediaStreamSource(micStream);
+        analyser = audioCtx.createAnalyser();
+        analyser.fftSize = 2048;
+        bufferLength = analyser.fftSize;
+        dataArray = new Float32Array(bufferLength);
+        source.connect(analyser);
+        console.log("Mic initialized!");
+    } catch(e){
+        alert("Microphone access denied. Open via HTTPS or localhost.");
+        console.error(e);
+    }
+}
+
+// Play short ping sound
+function playPing(){
+    if(!audioCtx) return;
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type = "sine";
+    osc.frequency.value = 12000; // high pitch
+    gain.gain.setValueAtTime(0, audioCtx.currentTime);
+    gain.gain.linearRampToValueAtTime(1, audioCtx.currentTime+0.002);
+    gain.gain.linearRampToValueAtTime(0, audioCtx.currentTime+0.02);
+    osc.connect(gain).connect(audioCtx.destination);
+    osc.start();
+    osc.stop(audioCtx.currentTime+0.03);
+}
+
+// Detect echo peaks after ping
+function detectEcho(){
+    if(!analyser) return [];
+    analyser.getFloatTimeDomainData(dataArray);
+    const threshold = 0.05;
+    const echoes = [];
+    for(let i=0;i<dataArray.length;i++){
+        if(Math.abs(dataArray[i])>threshold){
+            echoes.push(i);
+        }
+    }
+    return echoes;
+}
+
+// Draw echo points (no circles)
+function drawEchoes(echos){
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+    const cx = canvas.width/2;
+    const cy = canvas.height/2;
+    const maxDist = bufferLength;
+    ctx.fillStyle="#0f0";
+    echos.forEach(idx=>{
+        const r = (idx/maxDist) * (canvas.width/2);
+        const angle = Math.random()*2*Math.PI;
+        const x = cx + r*Math.cos(angle);
+        const y = cy + r*Math.sin(angle);
+        ctx.beginPath();
+        ctx.arc(x,y,3,0,2*Math.PI);
+        ctx.fill();
+    });
+}
+
+// Ping button
+document.getElementById("pingBtn").onclick = async ()=>{
+    if(!audioCtx) await initAudio();
+    playPing();
+    setTimeout(()=>{
+        const echoes = detectEcho();
+        drawEchoes(echoes);
+    },50); // wait 50ms for echo
+};
+</script>
+</body>
+</html>
