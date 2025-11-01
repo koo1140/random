@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LIDAR Scan Prototype</title>
+<style>
+  html,body {margin:0;padding:0;overflow:hidden;background:#000;}
+  video {display:none;}
+  canvas {position:fixed;top:0;left:0;width:100%;height:100%;}
+</style>
+</head>
+<body>
+<video id="cam" autoplay playsinline></video>
+<canvas id="three"></canvas>
+
+<script src="https://cdn.jsdelivr.net/npm/three@0.161.0/build/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/selfie_segmentation/selfie_segmentation.js"></script>
+
+<script>
+(async () => {
+  const video = document.getElementById('cam');
+  const canvas3d = document.getElementById('three');
+
+  // Start camera
+  const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+  video.srcObject = stream;
+  await video.play();
+
+  // MediaPipe segmentation
+  const segmenter = new SelfieSegmentation({ locateFile: f => 
+    `https://cdn.jsdelivr.net/npm/@mediapipe/selfie_segmentation/${f}` });
+  segmenter.setOptions({ modelSelection: 1 });
+  await segmenter.initialize();
+
+  // Three.js scene
+  const renderer = new THREE.WebGLRenderer({ canvas: canvas3d });
+  const scene = new THREE.Scene();
+  const camera3d = new THREE.PerspectiveCamera(70, innerWidth/innerHeight, 0.1, 1000);
+  camera3d.position.z = 2;
+  const pointsGeometry = new THREE.BufferGeometry();
+  const maxPoints = 640*480;
+  const positions = new Float32Array(maxPoints*3);
+  const colors = new Float32Array(maxPoints*3);
+  pointsGeometry.setAttribute('position', new THREE.BufferAttribute(positions,3));
+  pointsGeometry.setAttribute('color', new THREE.BufferAttribute(colors,3));
+  const pointsMaterial = new THREE.PointsMaterial({ size:0.01, vertexColors:true });
+  const points = new THREE.Points(pointsGeometry, pointsMaterial);
+  scene.add(points);
+
+  // Orientation tracking
+  let rotX=0, rotY=0;
+  window.addEventListener('deviceorientation', e=>{
+    rotY = (e.alpha||0) * Math.PI/180;
+    rotX = (e.beta||0) * Math.PI/180;
+  });
+
+  const tmpCanvas = document.createElement('canvas');
+  const tmpCtx = tmpCanvas.getContext('2d');
+  tmpCanvas.width = 160; tmpCanvas.height = 120;
+
+  function updatePoints(maskImage) {
+    tmpCtx.drawImage(maskImage,0,0,160,120);
+    const data = tmpCtx.getImageData(0,0,160,120).data;
+    let i3=0;
+    for (let y=0;y<120;y++){
+      for (let x=0;x<160;x++){
+        const i = (y*160+x)*4;
+        const val = data[i]/255; // mask intensity
+        const depth = 1.0 - val; // near if foreground
+        positions[i3]   = (x/80 - 1) * depth;
+        positions[i3+1] = -(y/60 - 1) * depth;
+        positions[i3+2] = -depth*2;
+        colors[i3]   = 0;
+        colors[i3+1] = val;
+        colors[i3+2] = 0;
+        i3 += 3;
+      }
+    }
+    pointsGeometry.attributes.position.needsUpdate = true;
+    pointsGeometry.attributes.color.needsUpdate = true;
+  }
+
+  async function processFrame() {
+    await segmenter.send({image: video});
+  }
+
+  segmenter.onResults(results=>{
+    if(results.segmentationMask) updatePoints(results.segmentationMask);
+  });
+
+  function animate(){
+    requestAnimationFrame(animate);
+    processFrame();
+    scene.rotation.x = rotX;
+    scene.rotation.y = rotY;
+    renderer.setSize(innerWidth, innerHeight);
+    renderer.render(scene, camera3d);
+  }
+
+  animate();
+})();
+</script>
+</body>
+</html>
