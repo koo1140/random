@@ -1,0 +1,452 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Artificial SuperIntelligence Engine</title>
+<style>
+  :root{ --bg:#000; --title:#fff }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%;width:100%;background:var(--bg);font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial;}
+  canvas{position:fixed;inset:0;width:100%;height:100%;display:block;z-index:0}
+  .stage{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;z-index:2;pointer-events:none}
+  .title{
+    color:var(--title);
+    font-weight:800;
+    text-align:center;
+    pointer-events:auto;
+    font-size:clamp(1.2rem,3.2vw,2rem);
+    -webkit-font-smoothing:antialiased;
+    -webkit-text-stroke:0.01em rgba(255,255,255,0.06);
+    text-shadow:0 0 12px rgba(255,255,255,0.06), 0 2px 20px rgba(0,0,0,0.6);
+    padding:0 20px;
+    user-select:none;
+  }
+  /* small accessibility helper, hidden */
+  .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+  /* prevent touch scrolling while interacting visually */
+  html,body,canvas{touch-action:none}
+  
+.title {
+  color: var(--title);
+  font-weight: 800;
+  text-align: center;
+  pointer-events: auto;
+  font-size: clamp(1.2rem, 3.2vw, 2rem);
+  -webkit-font-smoothing: antialiased;
+  -webkit-text-stroke: 0.01em rgba(255,255,255,0.06);
+  text-shadow: 0 0 12px rgba(255,255,255,0.06), 0 2px 20px rgba(0,0,0,0.6);
+  padding: 0 20px;
+  user-select: none;
+  
+  /* Combined typewriter and fade */
+  overflow: hidden;
+  white-space: nowrap;
+  margin: 0 auto;
+  opacity: 0;
+  animation: 
+    typeAndFade 2s ease-in-out forwards;
+  animation-delay: 0.8s;
+}
+
+@keyframes typeAndFade {
+  0% {
+    width: 0;
+    opacity: 0;
+  }
+  50% {
+    opacity: 0.7;
+  }
+  100% {
+    width: 100%;
+    opacity: 1;
+  }
+}
+</style>
+</head>
+<body>
+
+<canvas id="gl"></canvas>
+<div class="stage" aria-hidden="false">
+  <h1 class="title">Artificial SuperIntelligence Engine</h1>
+</div>
+
+<script>
+(() => {
+  const canvas = document.getElementById('gl');
+  const gl = canvas.getContext('webgl2', { antialias: true, alpha: false });
+
+  if (!gl) {
+    document.body.style.background = 'radial-gradient(circle at 30% 30%, #070717 0%, #000 60%)';
+    return;
+  }
+
+  // shaders (adapted from provided code to GL ES 3.00)
+  const vsSource = `#version 300 es
+  in vec2 aPosition;
+  out vec2 vUv;
+  void main(){
+    vUv = aPosition * 0.5 + 0.5;
+    gl_Position = vec4(aPosition, 0.0, 1.0);
+  }`;
+
+  const fsSource = `#version 300 es
+  precision highp float;
+  precision highp int;
+  in vec2 vUv;
+  out vec4 fragColor;
+
+  uniform vec2  uResolution;
+  uniform float uTime;
+
+  uniform float uIntensity;
+  uniform float uSpeed;
+  uniform int   uAnimType;
+  uniform vec2  uMouse;
+  uniform int   uColorCount;
+  uniform float uDistort;
+  uniform vec2  uOffset;
+  uniform sampler2D uGradient;
+  uniform float uNoiseAmount;
+  uniform int   uRayCount;
+
+  // helpers
+  float hash21(vec2 p){
+      p = floor(p);
+      float f = 52.9829189 * fract(dot(p, vec2(0.065, 0.005)));
+      return fract(f);
+  }
+
+  mat2 rot30(){ return mat2(0.8, -0.5, 0.5, 0.8); }
+
+  float layeredNoise(vec2 fragPx){
+      vec2 p = mod(fragPx + vec2(uTime * 30.0, -uTime * 21.0), 1024.0);
+      vec2 q = rot30() * p;
+      float n = 0.0;
+      n += 0.40 * hash21(q);
+      n += 0.25 * hash21(q * 2.0 + 17.0);
+      n += 0.20 * hash21(q * 4.0 + 47.0);
+      n += 0.10 * hash21(q * 8.0 + 113.0);
+      n += 0.05 * hash21(q * 16.0 + 191.0);
+      return n;
+  }
+
+  vec3 rayDir(vec2 frag, vec2 res, vec2 offset, float dist){
+      float focal = res.y * max(dist, 1e-3);
+      return normalize(vec3(2.0 * (frag - offset) - res, focal));
+  }
+
+  float edgeFade(vec2 frag, vec2 res, vec2 offset){
+      vec2 toC = frag - 0.5 * res - offset;
+      float r = length(toC) / (0.5 * min(res.x, res.y));
+      float x = clamp(r, 0.0, 1.0);
+      float q = x * x * x * (x * (x * 6.0 - 15.0) + 10.0);
+      float s = q * 0.5;
+      s = pow(s, 1.5);
+      float tail = 1.0 - pow(1.0 - s, 2.0);
+      s = mix(s, tail, 0.2);
+      float dn = (layeredNoise(frag * 0.15) - 0.5) * 0.0015 * s;
+      return clamp(s + dn, 0.0, 1.0);
+  }
+
+  mat3 rotX(float a){ float c = cos(a), s = sin(a); return mat3(1.0,0.0,0.0, 0.0,c,-s, 0.0,s,c); }
+  mat3 rotY(float a){ float c = cos(a), s = sin(a); return mat3(c,0.0,s, 0.0,1.0,0.0, -s,0.0,c); }
+  mat3 rotZ(float a){ float c = cos(a), s = sin(a); return mat3(c,-s,0.0, s,c,0.0, 0.0,0.0,1.0); }
+
+  vec3 sampleGradient(float t){
+      t = clamp(t, 0.0, 1.0);
+      return texture(uGradient, vec2(t, 0.5)).rgb;
+  }
+
+  vec2 rot2(vec2 v, float a){
+      float s = sin(a), c = cos(a);
+      return mat2(c, -s, s, c) * v;
+  }
+
+  float bendAngle(vec3 q, float t){
+      float a = 0.8 * sin(q.x * 0.55 + t * 0.6)
+              + 0.7 * sin(q.y * 0.50 - t * 0.5)
+              + 0.6 * sin(q.z * 0.60 + t * 0.7);
+      return a;
+  }
+
+  void main(){
+      vec2 frag = gl_FragCoord.xy;
+      float t = uTime * uSpeed;
+      float jitterAmp = 0.1 * clamp(uNoiseAmount, 0.0, 1.0);
+      vec3 dir = rayDir(frag, uResolution, uOffset, 1.0);
+      float marchT = 0.0;
+      vec3 col = vec3(0.0);
+      float n = layeredNoise(frag);
+      vec4 c = cos(t * 0.2 + vec4(0.0, 33.0, 11.0, 0.0));
+      mat2 M2 = mat2(c.x, c.y, c.z, c.w);
+      float amp = clamp(uDistort, 0.0, 50.0) * 0.15;
+
+      mat3 rot3dMat = mat3(1.0);
+      if(uAnimType == 1){
+        vec3 ang = vec3(t * 0.31, t * 0.21, t * 0.17);
+        rot3dMat = rotZ(ang.z) * rotY(ang.y) * rotX(ang.x);
+      }
+      mat3 hoverMat = mat3(1.0);
+      if(uAnimType == 2){
+        vec2 mm = uMouse * 2.0 - 1.0;
+        vec3 ang = vec3(mm.y * 0.6, mm.x * 0.6, 0.0);
+        hoverMat = rotY(ang.y) * rotX(ang.x);
+      }
+
+      for (int i = 0; i < 44; ++i) {
+          vec3 P = marchT * dir;
+          P.z -= 2.0;
+          float rad = length(P);
+          vec3 Pl = P * (10.0 / max(rad, 1e-6));
+
+          if(uAnimType == 0){
+              Pl.xz *= M2;
+          } else if(uAnimType == 1){
+              Pl = rot3dMat * Pl;
+          } else {
+              Pl = hoverMat * Pl;
+          }
+
+          float stepLen = min(rad - 0.3, n * jitterAmp) + 0.1;
+
+          float grow = smoothstep(0.35, 3.0, marchT);
+          float a1 = amp * grow * bendAngle(Pl * 0.6, t);
+          float a2 = 0.5 * amp * grow * bendAngle(Pl.zyx * 0.5 + 3.1, t * 0.9);
+          vec3 Pb = Pl;
+          Pb.xz = rot2(Pb.xz, a1);
+          Pb.xy = rot2(Pb.xy, a2);
+
+          float rayPattern = smoothstep(
+              0.5, 0.7,
+              sin(Pb.x + cos(Pb.y) * cos(Pb.z)) *
+              sin(Pb.z + sin(Pb.y) * cos(Pb.x + t))
+          );
+
+          if (uRayCount > 0) {
+              float ang = atan(Pb.y, Pb.x);
+              float comb = 0.5 + 0.5 * cos(float(uRayCount) * ang);
+              comb = pow(comb, 3.0);
+              rayPattern *= smoothstep(0.15, 0.95, comb);
+          }
+
+          vec3 spectralDefault = 1.0 + vec3(
+              cos(marchT * 3.0 + 0.0),
+              cos(marchT * 3.0 + 1.0),
+              cos(marchT * 3.0 + 2.0)
+          );
+
+          float saw = fract(marchT * 0.25);
+          float tRay = saw * saw * (3.0 - 2.0 * saw);
+          vec3 userGradient = 2.0 * sampleGradient(tRay);
+          vec3 spectral = (uColorCount > 0) ? userGradient : spectralDefault;
+          vec3 base = (0.05 / (0.4 + stepLen))
+                    * smoothstep(5.0, 0.0, rad)
+                    * spectral;
+
+          col += base * rayPattern;
+          marchT += stepLen;
+      }
+
+      col *= edgeFade(frag, uResolution, uOffset);
+      col *= uIntensity;
+
+      fragColor = vec4(clamp(col, 0.0, 1.0), 1.0);
+  }`;
+
+  // compile helpers
+  function compileShader(type, src){
+    const s = gl.createShader(type);
+    gl.shaderSource(s, src);
+    gl.compileShader(s);
+    if(!gl.getShaderParameter(s, gl.COMPILE_STATUS)){
+      console.error('Shader error', gl.getShaderInfoLog(s));
+      gl.deleteShader(s);
+      return null;
+    }
+    return s;
+  }
+
+  const vs = compileShader(gl.VERTEX_SHADER, vsSource);
+  const fs = compileShader(gl.FRAGMENT_SHADER, fsSource);
+  const prog = gl.createProgram();
+  gl.attachShader(prog, vs);
+  gl.attachShader(prog, fs);
+  gl.linkProgram(prog);
+  if(!gl.getProgramParameter(prog, gl.LINK_STATUS)){
+    console.error('Program link:', gl.getProgramInfoLog(prog));
+  }
+  gl.useProgram(prog);
+
+  // fullscreen triangle (3 vertices)
+  const vertices = new Float32Array([
+    -1, -1,
+     3, -1,
+    -1,  3
+  ]);
+  const vao = gl.createVertexArray();
+  gl.bindVertexArray(vao);
+  const vbo = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
+  gl.bufferData(gl.ARRAY_BUFFER, vertices, gl.STATIC_DRAW);
+  const aPosition = gl.getAttribLocation(prog, 'aPosition');
+  gl.enableVertexAttribArray(aPosition);
+  gl.vertexAttribPointer(aPosition, 2, gl.FLOAT, false, 0, 0);
+  gl.bindVertexArray(null);
+
+  // uniform locations
+  const uResolution = gl.getUniformLocation(prog, 'uResolution');
+  const uTime = gl.getUniformLocation(prog, 'uTime');
+  const uIntensity = gl.getUniformLocation(prog, 'uIntensity');
+  const uSpeed = gl.getUniformLocation(prog, 'uSpeed');
+  const uAnimType = gl.getUniformLocation(prog, 'uAnimType');
+  const uMouse = gl.getUniformLocation(prog, 'uMouse');
+  const uColorCount = gl.getUniformLocation(prog, 'uColorCount');
+  const uDistort = gl.getUniformLocation(prog, 'uDistort');
+  const uOffset = gl.getUniformLocation(prog, 'uOffset');
+  const uNoiseAmount = gl.getUniformLocation(prog, 'uNoiseAmount');
+  const uRayCount = gl.getUniformLocation(prog, 'uRayCount');
+  const uGradient = gl.getUniformLocation(prog, 'uGradient');
+
+  // set static/default uniforms
+  gl.uniform1f(uSpeed, 0.5);
+  gl.uniform1i(uAnimType, 1); // rotate3d
+  gl.uniform1i(uColorCount, 1);
+  gl.uniform2f(uOffset, 0, 0);
+  gl.uniform1f(uNoiseAmount, 0.6);
+  gl.uniform1i(uRayCount, 0);
+
+  // gradient texture (1D)
+  const gradientTex = gl.createTexture();
+  gl.activeTexture(gl.TEXTURE0);
+  gl.bindTexture(gl.TEXTURE_2D, gradientTex);
+
+  // build 256x1 gradient (purple -> magenta -> cyan -> blue)
+  const gwidth = 256;
+  const data = new Uint8Array(gwidth * 4);
+  function lerp(a,b,t){ return a + (b-a)*t; }
+  const stops = [
+    [20,6,40],
+    [100,16,160],
+    [220,60,255],
+    [40,120,255]
+  ];
+  for(let i=0;i<gwidth;i++){
+    const t = i / (gwidth-1);
+    // interpolate between stops
+    const seg = t * (stops.length - 1);
+    const idx = Math.floor(seg);
+    const local = Math.min(1, seg - idx);
+    const sA = stops[idx];
+    const sB = stops[Math.min(stops.length-1, idx+1)];
+    const r = Math.round(lerp(sA[0], sB[0], local));
+    const g = Math.round(lerp(sA[1], sB[1], local));
+    const b = Math.round(lerp(sA[2], sB[2], local));
+    data[i*4+0]=r; data[i*4+1]=g; data[i*4+2]=b; data[i*4+3]=255;
+  }
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gwidth, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, data);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  gl.uniform1i(uGradient, 0);
+
+  // sizing & DPR handling
+  const DPR = Math.min(window.devicePixelRatio || 1, 2);
+  function resize(){
+    const cssW = Math.max(1, innerWidth);
+    const cssH = Math.max(1, innerHeight);
+    canvas.style.width = cssW + 'px';
+    canvas.style.height = cssH + 'px';
+    const w = Math.max(1, Math.floor(cssW * DPR));
+    const h = Math.max(1, Math.floor(cssH * DPR));
+    if (canvas.width !== w || canvas.height !== h) {
+      canvas.width = w; canvas.height = h;
+      gl.viewport(0,0,w,h);
+    }
+    gl.uniform2f(uResolution, canvas.width, canvas.height);
+  }
+  resize();
+  window.addEventListener('resize', resize);
+
+  // mouse handling (normalized)
+  let mouse = { x: 0.5, y: 0.5 };
+  const rect = () => canvas.getBoundingClientRect();
+  window.addEventListener('pointermove', (e) => {
+    const r = rect();
+    mouse.x = ((e.clientX - r.left) / Math.max(r.width,1));
+    mouse.y = ((e.clientY - r.top) / Math.max(r.height,1));
+  }, { passive: true });
+
+  // initial uniforms for intro
+  let currentIntensity = 0.0;
+  let currentDistort = 0.0;
+
+  // MANUAL CONFIGURATION
+  const flashDuration   = 1200; // total flash phase duration (ms)
+  const flashPeakTime   = 800;  // ms to reach peak intensity in flash
+  const rampDuration    = 7000; // slow ramp after flash (ms)
+  const flashIntensity  = 10.0;
+  const rampIntensity   = 1.0;
+  const flashDistort    = 10.0;
+  const rampDistort     = 10.0;
+
+  const startTime = performance.now();
+
+  // easing & clamp helpers
+  function easeOutCubic(t){ return 1 - Math.pow(1 - t, 3); }
+  function clamp01(v){ return Math.min(1, Math.max(0, v)); }
+
+  // main render loop
+  function render(now){
+    const elapsed = now - startTime;
+
+    if(elapsed < flashDuration){
+      // flash phase with controllable peak
+      let t;
+      if(elapsed <= flashPeakTime){
+        t = clamp01(elapsed / flashPeakTime); // rising to peak
+      } else {
+        t = clamp01(1 - (elapsed - flashPeakTime) / (flashDuration - flashPeakTime)); // falling
+      }
+      currentIntensity = t * flashIntensity;
+      currentDistort  = t * flashDistort;
+    } else {
+      // slow ramp phase (0->1)
+      const t = clamp01((elapsed - flashDuration) / rampDuration);
+      const ramp = easeOutCubic(t);
+      currentIntensity = ramp * rampIntensity;
+      currentDistort  = ramp * rampDistort;
+    }
+
+    // update uniforms
+    gl.uniform1f(uTime, (now - startTime) * 0.001);
+    gl.uniform1f(uIntensity, currentIntensity);
+    gl.uniform1f(uDistort, currentDistort);
+    gl.uniform2f(uMouse, mouse.x, mouse.y);
+
+    // draw
+    gl.bindVertexArray(vao);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+    gl.bindVertexArray(null);
+
+    requestAnimationFrame(render);
+  }
+  requestAnimationFrame(render);
+
+  // runtime tweak API
+  window.PRISTATIC = {
+    flashDuration, flashPeakTime, rampDuration,
+    flashIntensity, rampIntensity,
+    flashDistort, rampDistort,
+    setIntensity: v => gl.uniform1f(uIntensity, v),
+    setDistort: v => gl.uniform1f(uDistort, v),
+    setAnimType: n => gl.uniform1i(uAnimType, n|0),
+    setNoise: v => gl.uniform1f(uNoiseAmount, v)
+  };
+
+})();
+</script>
+
+</body>
+</html>
