@@ -1,0 +1,439 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Interactive Grid Animator</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Inter Font -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+    <!-- JSZip for downloading frames -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.7.1/jszip.min.js"></script>
+    <style>
+        body { font-family: 'Inter', sans-serif; background-color: #f7f7f9; }
+        .canvas-container {
+            position: relative;
+            cursor: crosshair;
+            border: 2px solid #e0e0e0;
+            max-width: 100%;
+            margin: auto;
+            border-radius: 0.75rem;
+            overflow: hidden;
+            /* Ensure container has height even before image loads */
+            min-height: 250px; 
+            background-color: #e5e7eb;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+        #editorCanvas {
+            /* Let CSS handle responsive scaling (width: 100% of container) */
+            display: none; /* Keep hidden until image is ready */
+            width: 100%;
+            height: auto; 
+            touch-action: none; /* Crucial for preventing mobile scrolling during drag */
+        }
+        #previewCanvas {
+            border: 3px solid #10b981;
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+            max-width: 100%;
+            height: auto;
+        }
+        /* Loading animation for visual feedback */
+        .spinner {
+            border: 4px solid rgba(0, 0, 0, 0.1);
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            border-left-color: #4f46e5;
+            animation: spin 1s ease infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body class="p-4 md:p-8">
+
+    <div class="max-w-4xl mx-auto">
+        <h1 class="text-3xl font-bold text-gray-800 mb-6 text-center">Grid Frame Animator</h1>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+            <!-- LEFT PANEL: Editor and Controls -->
+            <div class="space-y-6">
+                <!-- Image Upload -->
+                <div class="p-6 bg-white rounded-xl shadow-lg">
+                    <h2 class="text-xl font-semibold mb-3 text-gray-700">1. Upload Image</h2>
+                    <input type="file" id="imageInput" accept="image/*" class="w-full text-sm text-gray-500
+                        file:mr-4 file:py-2 file:px-4
+                        file:rounded-full file:border-0
+                        file:text-sm file:font-semibold
+                        file:bg-indigo-50 file:text-indigo-700
+                        hover:file:bg-indigo-100">
+                </div>
+
+                <!-- Canvas and Selection Area (Step 2) -->
+                <div class="p-6 bg-white rounded-xl shadow-lg">
+                    <h2 class="text-xl font-semibold mb-3 text-gray-700">2. Define Grid Region</h2>
+                    <div id="canvasWrapper" class="canvas-container">
+                         <!-- Visual feedback: Spinner and Text -->
+                         <div id="loadingIndicator" class="flex flex-col items-center">
+                            <p id="instructionPlaceholder" class="text-gray-500 text-center text-sm p-4">Awaiting image upload...</p>
+                         </div>
+                        <canvas id="editorCanvas"></canvas>
+                    </div>
+                    <p id="instructionText" class="text-sm text-gray-500 mt-2 text-center">
+                        Upload an image to start. Once loaded, drag a rectangle over the grid area.
+                    </p>
+                </div>
+
+                <!-- Grid Parameters -->
+                <div class="p-6 bg-white rounded-xl shadow-lg">
+                    <h2 class="text-xl font-semibold mb-4 text-gray-700">3. Set Grid Parameters</h2>
+                    <div class="grid grid-cols-3 gap-4">
+                        <div>
+                            <label for="rows" class="block text-sm font-medium text-gray-700">Rows</label>
+                            <input type="number" id="rows" value="2" min="1" class="mt-1 p-2 w-full border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500">
+                        </div>
+                        <div>
+                            <label for="cols" class="block text-sm font-medium text-gray-700">Columns</label>
+                            <input type="number" id="cols" value="2" min="1" class="mt-1 p-2 w-full border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500">
+                        </div>
+                        <div>
+                            <label for="duration" class="block text-sm font-medium text-gray-700">Frame Duration (ms)</label>
+                            <input type="number" id="duration" value="500" min="50" class="mt-1 p-2 w-full border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500">
+                        </div>
+                    </div>
+
+                    <button id="processBtn" class="mt-6 w-full py-3 px-4 border border-transparent rounded-xl shadow-sm text-lg font-medium text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition duration-150 ease-in-out disabled:opacity-50" disabled>
+                        Generate Animation
+                    </button>
+                </div>
+            </div>
+
+            <!-- RIGHT PANEL: Preview and Download -->
+            <div class="space-y-6">
+                <div class="p-6 bg-white rounded-xl shadow-lg h-full flex flex-col items-center">
+                    <h2 class="text-xl font-semibold mb-4 text-gray-700">4. Animation Preview</h2>
+                    <div class="flex-grow flex items-center justify-center w-full p-4">
+                        <canvas id="previewCanvas" class="rounded-xl"></canvas>
+                    </div>
+                    <p id="previewStatus" class="text-sm text-gray-500 mt-4 h-5">No frames generated.</p>
+                    <button id="downloadBtn" class="mt-6 w-full py-3 px-4 border border-transparent rounded-xl shadow-sm text-lg font-medium text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 transition duration-150 ease-in-out disabled:opacity-50" disabled>
+                        Download Frames (.zip)
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Global variables for image and canvas context
+        let img = null;
+        let editorCanvas, editorCtx;
+        let previewCanvas, previewCtx;
+        let frames = [];
+        let animationInterval;
+
+        // Selection variables
+        let isDrawing = false;
+        let startX, startY;
+        let selectionRect = { x: 0, y: 0, w: 0, h: 0 }; // Stored in actual canvas pixels
+
+        // DOM elements
+        const elements = {
+            imageInput: document.getElementById('imageInput'),
+            canvasWrapper: document.getElementById('canvasWrapper'),
+            instructionText: document.getElementById('instructionText'),
+            loadingIndicator: document.getElementById('loadingIndicator'),
+            rowsInput: document.getElementById('rows'),
+            colsInput: document.getElementById('cols'),
+            durationInput: document.getElementById('duration'),
+            processBtn: document.getElementById('processBtn'),
+            downloadBtn: document.getElementById('downloadBtn'),
+            previewStatus: document.getElementById('previewStatus')
+        };
+
+
+        // --- Initialization and Setup ---
+
+        document.addEventListener('DOMContentLoaded', () => {
+            editorCanvas = document.getElementById('editorCanvas');
+            editorCtx = editorCanvas.getContext('2d');
+            previewCanvas = document.getElementById('previewCanvas');
+            previewCtx = previewCanvas.getContext('2d');
+
+            // Attach event listeners
+            elements.imageInput.addEventListener('change', handleImageUpload);
+            elements.processBtn.addEventListener('click', generateFramesAndAnimate);
+            elements.downloadBtn.addEventListener('click', downloadFramesAsZip);
+
+            // Setup canvas interaction for selection
+            editorCanvas.addEventListener('mousedown', startSelection);
+            editorCanvas.addEventListener('mousemove', drawSelection);
+            editorCanvas.addEventListener('mouseup', endSelection);
+            editorCanvas.addEventListener('mouseleave', endSelection);
+            
+            // Touch listeners for mobile support
+            editorCanvas.addEventListener('touchstart', startSelectionTouch);
+            editorCanvas.addEventListener('touchmove', drawSelectionTouch);
+            editorCanvas.addEventListener('touchend', endSelectionTouch);
+
+            // Set initial state for preview canvas (placeholder)
+            previewCanvas.width = 300;
+            previewCanvas.height = 300;
+            previewCanvas.style.width = '300px';
+            previewCanvas.style.height = '300px';
+            previewCtx.fillStyle = '#f0f0f0';
+            previewCtx.fillRect(0, 0, 300, 300);
+            previewCtx.font = '20px Inter';
+            previewCtx.fillStyle = '#9ca3af';
+            previewCtx.textAlign = 'center';
+            previewCtx.fillText('Preview', 150, 150);
+        });
+
+        // --- Core Functions: Image Loading and Scaling ---
+
+        function handleImageUpload(e) {
+            const file = e.target.files[0];
+            if (!file) {
+                elements.instructionText.textContent = 'Upload an image to start.';
+                return;
+            }
+
+            elements.processBtn.disabled = true;
+            elements.instructionText.textContent = `Loading "${file.name}"...`;
+            elements.loadingIndicator.innerHTML = '<div class="spinner"></div>';
+            editorCanvas.style.display = 'none';
+
+            const reader = new FileReader();
+            reader.onload = (event) => {
+                img = new Image();
+                img.onload = () => {
+                    // This function runs only after the image data is fully parsed and loaded
+                    setupCanvas();
+                    // Set default selection to cover the entire image
+                    selectionRect = { x: 0, y: 0, w: img.width, h: img.height };
+                    elements.instructionText.textContent = 'Drag a box over the frames grid. Hit "Generate Animation" when ready.';
+                    elements.processBtn.disabled = false;
+                    drawCanvas();
+                };
+                img.onerror = () => {
+                    elements.instructionText.textContent = 'Error loading image. Please try a different file.';
+                    elements.loadingIndicator.innerHTML = `<p class="text-red-500 text-center text-sm p-4">Load Error</p>`;
+                    editorCanvas.style.display = 'none';
+                };
+                // Set the image source using the Data URL
+                img.src = event.target.result;
+            };
+            reader.readAsDataURL(file); // Read the file as a Data URL (base64)
+        }
+
+        function setupCanvas() {
+            if (!img) return;
+
+            // 1. Set internal canvas resolution (1:1 with image pixels)
+            editorCanvas.width = img.width;
+            editorCanvas.height = img.height;
+            
+            // 2. Hide loading indicator and show canvas
+            elements.loadingIndicator.style.display = 'none';
+            editorCanvas.style.display = 'block';
+        }
+
+        function drawCanvas() {
+            if (!img) return;
+
+            // 1. Draw the base image
+            editorCtx.clearRect(0, 0, editorCanvas.width, editorCanvas.height);
+            editorCtx.drawImage(img, 0, 0, editorCanvas.width, editorCanvas.height);
+
+            // 2. Draw Selection Rectangle
+            editorCtx.strokeStyle = '#EF4444'; // Red
+            editorCtx.lineWidth = 4;
+            editorCtx.strokeRect(selectionRect.x, selectionRect.y, selectionRect.w, selectionRect.h);
+
+            // 3. Draw Grid Overlay
+            if (selectionRect.w > 0 && selectionRect.h > 0) {
+                const rows = parseInt(elements.rowsInput.value) || 1;
+                const cols = parseInt(elements.colsInput.value) || 1;
+
+                const frameW = selectionRect.w / cols;
+                const frameH = selectionRect.h / rows;
+                
+                editorCtx.strokeStyle = 'rgba(255, 255, 255, 0.7)'; // White, slightly transparent
+                editorCtx.lineWidth = 2;
+
+                // Vertical lines
+                for (let i = 1; i < cols; i++) {
+                    const x = selectionRect.x + i * frameW;
+                    editorCtx.beginPath();
+                    editorCtx.moveTo(x, selectionRect.y);
+                    editorCtx.lineTo(x, selectionRect.y + selectionRect.h);
+                    editorCtx.stroke();
+                }
+
+                // Horizontal lines
+                for (let i = 1; i < rows; i++) {
+                    const y = selectionRect.y + i * frameH;
+                    editorCtx.beginPath();
+                    editorCtx.moveTo(selectionRect.x, y);
+                    editorCtx.lineTo(selectionRect.x + selectionRect.w, y);
+                    editorCtx.stroke();
+                }
+            }
+        }
+
+        // --- Selection Logic ---
+        
+        // Helper function to get coordinates adjusted for canvas display size
+        function getCanvasCoords(clientX, clientY) {
+            const rect = editorCanvas.getBoundingClientRect(); // Get rendered position/size
+            
+            // Calculate scale factor between canvas internal size (pixels) and display size (rect.width/height)
+            const scaleX = editorCanvas.width / rect.width; 
+            const scaleY = editorCanvas.height / rect.height; 
+            
+            return {
+                // (Client position - Canvas start position) * Scale factor
+                x: (clientX - rect.left) * scaleX,
+                y: (clientY - rect.top) * scaleY
+            };
+        }
+
+        function startSelection(e) {
+            if (!img) return;
+            isDrawing = true;
+            // Use e.clientX/Y for desktop
+            const coords = getCanvasCoords(e.clientX, e.clientY);
+            startX = coords.x;
+            startY = coords.y;
+            selectionRect = { x: startX, y: startY, w: 0, h: 0 };
+            drawCanvas();
+        }
+
+        function drawSelection(e) {
+            if (!isDrawing || !img) return;
+            // Use e.clientX/Y for desktop
+            const coords = getCanvasCoords(e.clientX, e.clientY);
+            
+            const dx = coords.x - startX;
+            const dy = coords.y - startY;
+
+            // Update selection rectangle, ensuring positive width/height
+            selectionRect.x = Math.min(startX, coords.x);
+            selectionRect.y = Math.min(startY, coords.y);
+            selectionRect.w = Math.abs(dx);
+            selectionRect.h = Math.abs(dy);
+            
+            drawCanvas();
+        }
+
+        function endSelection() {
+            if (!isDrawing || !img) return;
+            isDrawing = false;
+            
+            // Clamp selection within image boundaries
+            selectionRect.x = Math.max(0, selectionRect.x);
+            selectionRect.y = Math.max(0, selectionRect.y);
+            
+            selectionRect.w = Math.min(editorCanvas.width - selectionRect.x, selectionRect.w);
+            selectionRect.h = Math.min(editorCanvas.height - selectionRect.y, selectionRect.h);
+            
+            drawCanvas();
+        }
+        
+        // Touch adaptations
+        function getTouch(e) {
+            return e.touches[0] || e.changedTouches[0];
+        }
+        function startSelectionTouch(e) {
+            e.preventDefault(); // Prevent scrolling/default touch action
+            const touch = getTouch(e);
+            startSelection({ clientX: touch.clientX, clientY: touch.clientY });
+        }
+        function drawSelectionTouch(e) {
+            const touch = getTouch(e);
+            drawSelection({ clientX: touch.clientX, clientY: touch.clientY });
+        }
+        function endSelectionTouch(e) {
+            endSelection();
+        }
+        
+        
+        // --- Frame Processing and Animation ---
+
+        function generateFramesAndAnimate() {
+            if (!img || selectionRect.w <= 0 || selectionRect.h <= 0) {
+                elements.previewStatus.textContent = 'Please upload an image and select a region.';
+                return;
+            }
+
+            const rows = parseInt(elements.rowsInput.value) || 1;
+            const cols = parseInt(elements.colsInput.value) || 1;
+            
+            if (rows < 1 || cols < 1) {
+                elements.previewStatus.textContent = 'Rows and Columns must be 1 or greater.';
+                return;
+            }
+            
+            elements.processBtn.disabled = true;
+            elements.processBtn.textContent = 'Processing...';
+
+            // 1. Calculate Frame Dimensions (actual pixel values from the original image)
+            const frameW = selectionRect.w / cols;
+            const frameH = selectionRect.h / rows;
+            
+            frames = [];
+
+            // 2. Crop and Store Frames
+            for (let r = 0; r < rows; r++) {
+                for (let c = 0; c < cols; c++) {
+                    const srcX = selectionRect.x + c * frameW;
+                    const srcY = selectionRect.y + r * frameH;
+
+                    const tempCanvas = document.createElement('canvas');
+                    tempCanvas.width = frameW;
+                    tempCanvas.height = frameH;
+                    const tempCtx = tempCanvas.getContext('2d');
+                    
+                    // Use the original image object directly for cropping accuracy
+                    tempCtx.drawImage(
+                        img, // Source image
+                        srcX, srcY, frameW, frameH, // Source clip area (x, y, w, h)
+                        0, 0, frameW, frameH      // Destination area (x, y, w, h)
+                    );
+
+                    frames.push(tempCanvas);
+                }
+            }
+
+            // 3. Setup Preview Canvas and Start Animation
+            if (frames.length > 0) {
+                // Set internal resolution of preview canvas
+                previewCanvas.width = frames[0].width;
+                previewCanvas.height = frames[0].height;
+                
+                // Adjust preview canvas display size (let CSS handle responsiveness)
+                const maxDim = 300;
+                let ratio = Math.min(maxDim / frames[0].width, maxDim / frames[0].height);
+                ratio = ratio > 1 ? 1 : ratio; 
+                
+                previewCanvas.style.width = `${frames[0].width * ratio}px`;
+                previewCanvas.style.height = `${frames[0].height * ratio}px`;
+                
+                startAnimation(frames, parseInt(elements.durationInput.value) || 500);
+                elements.downloadBtn.disabled = false;
+                elements.previewStatus.textContent = `Frames: ${frames.length} | W:${Math.round(frames[0].width)}px H:${Math.round(frames[0].height)}px`;
+            } else {
+                elements.previewStatus.textContent = 'Error: No frames were generated. Check grid dimensions.';
+            }
+
+            elements.processBtn.disabled = false;
+            elements.processBtn.textContent = 'Generate Animation';
+        }
+
+
+        fu
