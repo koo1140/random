@@ -264,7 +264,7 @@ def main(train_base=True, fine_tune=False, base_ckpt=None):
 - Exactly — you run it once to train the base model, then run it again to fine-tune on new data.
 
 >>>>>>>>> - this means that it also fully works like my old train with attention and advanced scoring system, all other stuff. and after fientune it has chat template
-- Yes — after fine-tuning, it retains attention, scoring/rerank, and chat interface, just like your old script.
+- NO. its not complete
 
 >>>>>>>>> - what datset is used for what step
 - Base training → TinyStories; fine-tuning → your chat dataset (e.g., LMSYS-chat or other user→assistant pairs).
