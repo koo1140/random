@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Audio</title>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.11.0/dist/tf.min.js"></script>
+</head>
+<body style="font-family: Arial, sans-serif; padding:22px; max-width:720px; margin:auto;">
+
+<h2 style="margin-bottom:6px;">Model B — Conv1D + Residual (very clean)</h2>
+<p style="margin-top:0; margin-bottom:12px;">Residual skip connections help preserve fine details (less blurring/noise).</p>
+
+<input id="file" type="file" accept="audio/*" style="margin-bottom:12px;">
+<br>
+
+<div style="margin-bottom:12px;">
+  <label for="epochs-input">Epochs (default 5):</label>
+  <input type="number" id="epochs-input" value="5" min="1" style="width: 80px; margin-right: 15px;">
+
+  <label for="batch-size-input">Batch Size (default 16):</label>
+  <input type="number" id="batch-size-input" value="16" min="1" style="width: 80px;">
+</div>
+<button id="train" disabled style="padding:8px 14px; margin-right:8px;">Train</button>
+<button id="play" disabled style="padding:8px 14px;">Play Reconstructed</button>
+
+<div id="stats" style="margin-top:18px; background:#f7f7f7; border:1px solid #ddd; padding:10px; border-radius:8px;">
+  <b>Training stats</b><br>
+  Epoch: <span id="epoch">0</span> &nbsp; Loss: <span id="loss">0</span> &nbsp; Mem: <span id="mem">0</span> MB
+</div>
+
+<audio id="player" controls style="width:100%; margin-top:18px;"></audio>
+
+<script>
+let audioData = null;
+let model = null;
+const sampleRate = 8000;
+const chunkSize = 512; // smaller chunk for more detail
+
+document.getElementById('file').addEventListener('change', async (e) => {
+  const f = e.target.files[0];
+  if (!f) return;
+  const ab = await f.arrayBuffer();
+  const ctx = new (window.AudioContext || window.webkitAudioContext)({sampleRate});
+  const decoded = await ctx.decodeAudioData(ab);
+  audioData = decoded.getChannelData(0);
+  alert('Audio loaded: ' + (audioData.length / sampleRate).toFixed(2) + ' s');
+  document.getElementById('train').disabled = false;
+});
+
+function makeChunks(wave, size) {
+  const chunks = [];
+  for (let i = 0; i < wave.length; i += size) {
+    const slice = wave.slice(i, i + size);
+    if (slice.length < size) {
+      const padded = new Float32Array(size);
+      padded.set(slice);
+      chunks.push(padded);
+    } else {
+      chunks.push(slice);
+    }
+  }
+  return chunks;
+}
+
+// Residual block helper (conv1d -> conv1d + add)
+function residualBlock(x, filters, kernelSize=5) {
+  const conv1 = tf.layers.conv1d({filters, kernelSize, strides:1, padding:'same', activation:'relu'}).apply(x);
+  const conv2 = tf.layers.conv1d({filters, kernelSize, strides:1, padding:'same'}).apply(conv1);
+  const added = tf.layers.add().apply([x, conv2]);
+  const out = tf.layers.activation({activation:'relu'}).apply(added);
+  return out;
+}
+
+function buildModelB(chunkSize=chunkSize) {
+  const input = tf.input({shape:[chunkSize,1]});
+  // Encoder
+  let e1 = tf.layers.conv1d({filters:16,kernelSize:9,strides:2,padding:'same',activation:'relu'}).apply(input); // L/2
+  let e2 = tf.layers.conv1d({filters:32,kernelSize:7,strides:2,padding:'same',activation:'relu'}).apply(e1); // L/4
+  let e3 = tf.layers.conv1d({filters:64,kernelSize:5,strides:2,padding:'same',activation:'relu'}).apply(e2); // L/8
+
+  // Residuals at bottleneck
+  let r = residualBlock(e3, 64, 3);
+  r = residualBlock(r, 64, 3);
+
+  // Decoder using conv2dTranspose trick. reshape
+  let shape = r.shape;
+  let x = tf.layers.reshape({targetShape:[shape[1],1,shape[2]]}).apply(r);
+
+  x = tf.layers.conv2dTranspose({filters:32, kernelSize:[9,1], strides:[2,1], padding:'same', activation:'relu'}).apply(x); // L/4
+  // skip connection from e2 (reshape and add)
+  let e2r = tf.layers.reshape({targetShape:[e2.shape[1],1,e2.shape[2]]}).apply(e2);
+  // align shapes if necessary by a conv
+  const convAlign = tf.layers.conv2d({filters:32,kernelSize:[1,1],padding:'same'}).apply(e2r);
+  x = tf.layers.add().apply([x, convAlign]);
+  x = tf.layers.activation({activation:'relu'}).apply(x);
+
+  x = tf.layers.conv2dTranspose({filters:16,kernelSize:[7,1],strides:[2,1],padding:'same',activation:'relu'}).apply(x); // L/2
+  // skip connect from e1
+  let e1r = tf.layers.reshape({targetShape:[e1.shape[1],1,e1.shape[2]]}).apply(e1);
+  const convAlign2 = tf.layers.conv2d({filters:16,kernelSize:[1,1],padding:'same'}).apply(e1r);
+  x = tf.layers.add().apply([x, convAlign2]);
+  x = tf.layers.activation({activation:'relu'}).apply(x);
+
+  x = tf.layers.conv2dTranspose({filters:8,kernelSize:[5,1],strides:[2,1],padding:'same',activation:'relu'}).apply(x); // L
+
+  x = tf.layers.conv2d({filters:1,kernelSize:[5,1],padding:'same',activation:'tanh'}).apply(x);
+  const out = tf.layers.reshape({targetShape:[chunkSize,1]}).apply(x);
+
+  const m = tf.model({inputs:input, outputs:out});
+  m.compile({optimizer: tf.train.adam(0.0008), loss:'meanSquaredError'});
+  return m;
+}
+
+document.getElementById('train').addEventListener('click', async () => {
+  if (!audioData) return;
+  
+  // START: Read user-defined settings
+  const epochs = +document.getElementById('epochs-input').value;
+  const batchSize = +document.getElementById('batch-size-input').value;
+  // END: Read user-defined settings
+
+  const chunks = makeChunks(audioData, chunkSize);
+  const arr = chunks.map(c => Array.from(c));
+  let xs = tf.tensor(arr).expandDims(2);
+
+  model = buildModelB(chunkSize);
+  alert(`Training started (Model B - residual). Epochs: ${epochs}, Batch Size: ${batchSize}.`);
+
+  await model.fit(xs, xs, {
+    // START: Use user-defined settings
+    epochs: epochs,
+    batchSize: batchSize,
+    // END: Use user-defined settings
+    callbacks: {
+      onEpochEnd: (epoch, logs) => {
+        document.getElementById('epoch').innerText = epoch + 1;
+        document.getElementById('loss').innerText = logs.loss.toFixed(6);
+        document.getElementById('mem').innerText = (tf.memory().numBytes / (1024*1024)).toFixed(2);
+      }
+    }
+  });
+
+  alert('Training complete (Model B).');
+  document.getElementById('play').disabled = false;
+});
+
+document.getElementById('play').addEventListener('click', async () => {
+  if (!model || !audioData) return;
+  const chunks = makeChunks(audioData, chunkSize);
+  const arr = chunks.map(c => Array.from(c));
+  let xs = tf.tensor(arr).expandDims(2);
+  const preds = model.predict(xs);
+  const flat = preds.flatten().arraySync();
+
+  const ctx = new (window.AudioContext || window.webkitAudioContext)({sampleRate});
+  const buffer = ctx.createBuffer(1, flat.length, ctx.sampleRate);
+  buffer.copyToChannel(Float32Array.from(flat), 0);
+  const src = ctx.createBufferSource();
+  src.buffer = buffer;
+  src.connect(ctx.destination);
+  src.start();
+
+  // set audio element
+  function encodeWAV(samples, sampleRate) {
+    const bytesPerSample = 2;
+    const buffer = new ArrayBuffer(44 + samples.length * 2);
+    const view = new DataView(buffer);
+    function writeString(v, offset, s) { for (let i=0;i<s.length;i++) v.setUint8(offset+i, s.charCodeAt(i)); }
+    writeString(view,0,'RIFF'); view.setUint32(4,36+samples.length*2,true); writeString(view,8,'WAVE');
+    writeString(view,12,'fmt '); view.setUint32(16,16,true); view.setUint16(20,1,true); view.setUint16(22,1,true);
+    view.setUint32(24,sampleRate,true); view.setUint32(28,sampleRate*2,true); view.setUint16(32,2,true); view.setUint16(34,16,true);
+    writeString(view,36,'data'); view.setUint32(40,samples.length*2,true);
+    let offset=44; for (let i=0;i<samples.length;i++,offset+=2) { let s=Math.max(-1,Math.min(1,samples[i])); view.setInt16(offset, s<0 ? s*0x8000 : s*0x7FFF, true); }
+    return new Blob([view], {type:'audio/wav'});
+  }
+  const wav = encodeWAV(Float32Array.from(flat), sampleRate);
+  document.getElementById('player').src = URL.createObjectURL(wav);
+});
+</script>
+</body>
+</html>
