@@ -1,0 +1,47 @@
+<svg width="400" height="300" viewBox="0 0 400 300" xmlns="http://www.w3.org/2000/svg">
+  <style>
+    .line { stroke: #30363d; stroke-width: 0.5; opacity: 0.2; }
+    .node { fill: #161b22; stroke: #30363d; stroke-width: 1.5; }
+
+    @keyframes fire {
+      0%, 100% { fill: #161b22; stroke: #30363d; }
+      50% { fill: #58a6ff; stroke: #58a6ff; filter: drop-shadow(0 0 2px #58a6ff); }
+    }
+
+    .active { animation: fire 3s infinite; }
+    .d1 { animation-delay: 0.1s; }
+    .d2 { animation-delay: 0.7s; }
+    .d3 { animation-delay: 1.3s; }
+    .d4 { animation-delay: 1.9s; }
+    .d5 { animation-delay: 2.5s; }
+  </style>
+
+  <g class="line">
+    <line x1="60" y1="100" x2="200" y2="60" /> <line x1="60" y1="100" x2="200" y2="100" />
+    <line x1="60" y1="100" x2="200" y2="140" /> <line x1="60" y1="100" x2="200" y2="180" />
+    <line x1="60" y1="100" x2="200" y2="220" />
+    <line x1="60" y1="150" x2="200" y2="60" /> <line x1="60" y1="150" x2="200" y2="100" />
+    <line x1="60" y1="150" x2="200" y2="140" /> <line x1="60" y1="150" x2="200" y2="180" />
+    <line x1="60" y1="150" x2="200" y2="220" />
+    <line x1="60" y1="200" x2="200" y2="60" /> <line x1="60" y1="200" x2="200" y2="100" />
+    <line x1="60" y1="200" x2="200" y2="140" /> <line x1="60" y1="200" x2="200" y2="180" />
+    <line x1="60" y1="200" x2="200" y2="220" />
+
+    <line x1="200" y1="60" x2="340" y2="120" /> <line x1="200" y1="60" x2="340" y2="180" />
+    <line x1="200" y1="100" x2="340" y2="120" /> <line x1="200" y1="100" x2="340" y2="180" />
+    <line x1="200" y1="140" x2="340" y2="120" /> <line x1="200" y1="140" x2="340" y2="180" />
+    <line x1="200" y1="180" x2="340" y2="120" /> <line x1="200" y1="180" x2="340" y2="180" />
+    <line x1="200" y1="220" x2="340" y2="120" /> <line x1="200" y1="220" x2="340" y2="180" />
+  </g>
+
+  <circle class="node active d1" cx="60" cy="100" r="4" />
+  <circle class="node active d3" cx="60" cy="150" r="4" />
+  <circle class="node active d5" cx="60" cy="200" r="4" />
+  <circle class="node active d2" cx="200" cy="60" r="4" />
+  <circle class="node active d4" cx="200" cy="100" r="4" />
+  <circle class="node active d1" cx="200" cy="140" r="4" />
+  <circle class="node active d3" cx="200" cy="180" r="4" />
+  <circle class="node active d5" cx="200" cy="220" r="4" />
+  <circle class="node active d2" cx="340" cy="120" r="4" />
+  <circle class="node active d4" cx="340" cy="180" r="4" />
+</svg>
